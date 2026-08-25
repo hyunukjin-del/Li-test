@@ -1,0 +1,42 @@
+{
+  "run_no": 1,
+  "raw_materials": {
+    "li2co3_mass": 95.34,
+    "li2co3_water": 1040.0,
+    "fresh_cao_mass": 92.42,
+    "recycled_cao_mass": 0.0,
+    "slurry_water": 831.0,
+    "cao_purity": 1.0,
+    "temp_c": 80.0,
+    "time_h": 2.0,
+    "rpm": 250
+  },
+  "filtration": {
+    "primary_filtrate_mass": 1646.0,
+    "primary_filtrate_sg": 1.035,
+    "primary_filtrate_ph": 12.81,
+    "wet_cake_mass": 311.0,
+    "sample_wet_mass": 27.7,
+    "sample_dry_mass": 14.8
+  },
+  "washing": {
+    "wash_input_cake_mass": 283.0,
+    "washed_wet_cake_mass": 279.0,
+    "washed_dry_cake_mass": 141.0,
+    "wash_sol_mass": 832.0,
+    "wash_sol_sg": 1.0,
+    "wash_sol_ph": 13.70
+  },
+  "calcination": {
+    "test_dry_cake_mass": 40.6,
+    "calcined_cao_mass": 23.9,
+    "temp_c": 1000.0,
+    "time_h": 1.0
+  },
+  "icp_analysis": {
+    "primary_li_mg_l": 10500.0,
+    "primary_ca_mg_l": 120.0,
+    "wash_li_mg_l": 1400.0,
+    "wash_ca_mg_l": 80.0
+  }
+}
