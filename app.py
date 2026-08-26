@@ -91,6 +91,8 @@ if "auto_email_on_save" not in st.session_state:
     st.session_state.auto_email_on_save = True
 if "email_logs" not in st.session_state:
     st.session_state.email_logs = []
+if "doe_recipe_result" not in st.session_state:
+    st.session_state.doe_recipe_result = None
 
 if "history" not in st.session_state:
     st.session_state.history = pd.DataFrame([
@@ -109,7 +111,7 @@ if "history" not in st.session_state:
 
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
-        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 수기 일지/ICP 성적서 사진 인식, M/B 연산, 거동예측에 대해 무엇이든 질문해 주세요."}
+        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 수기 일지/ICP 사진 인식, M/B 연산, 자율 DoE 레시피 설계, 거동예측에 대해 무엇이든 질문해 주세요."}
     ]
 
 # --------------------------------------------------------------------------
@@ -181,7 +183,79 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
         return None, str(e)
 
 # --------------------------------------------------------------------------
-# [3] 이메일 발송 공통 함수
+# [3] LLM 기반 자율 DoE 레시피 추천 함수
+# --------------------------------------------------------------------------
+def generate_doe_recipe(strategy, target_constraints, custom_memo=""):
+    api_key = st.session_state.openai_api_key.strip()
+    if not api_key:
+        return None, "사이드바에 OpenAI API Key를 먼저 입력해 주세요."
+
+    try:
+        client = OpenAI(api_key=api_key)
+        history_summary = st.session_state.history.to_dict(orient="records")
+        last_run = len(st.session_state.history)
+
+        prompt = f"""당신은 탄산리튬(Li2CO3)에서 수산화리튬(LiOH)으로의 가성화 전환 및 CaO-CaCO3 순환(Ca-Loop) 습식 공정의 수석 화학공학 DoE(실험계획법) 전문가입니다.
+현재까지의 누적 실험 데이터와 연구원의 최적화 목표를 바탕으로, 다음 회차(Run {last_run + 1})를 위한 최적의 실험 배합비와 공정 운전 조건을 설계해 주세요.
+
+[누적 실험 이력]
+{json.dumps(history_summary, ensure_ascii=False, indent=2)}
+
+[최적화 전략/목표]
+- 전략명: {strategy}
+- 세부 목표/제약: {target_constraints}
+- 연구원 추가 메모: {custom_memo}
+
+다음 JSON 구조로만 정확히 응답해 주세요. 모든 파라미터는 실제 실험이 가능한 실현 가능한 숫자(float)여야 합니다.
+{{
+  "strategy_summary": "전략 핵심 요약 (1~2문장)",
+  "recommended_params": {{
+    "run_no": {last_run + 1},
+    "li2co3_mass": 95.34,
+    "li2co3_water": 1040.0,
+    "fresh_cao_mass": 68.52,
+    "recycled_cao_mass": 23.90,
+    "slurry_water": 831.0,
+    "temp_c": 85.0,
+    "time_h": 2.5,
+    "wash_sol_ratio": 3.0,
+    "calc_temp": 950.0,
+    "calc_time": 1.2
+  }},
+  "expected_kpis": {{
+    "expected_li_recovery_pct": 96.8,
+    "expected_lioh_conc_g_l": 62.5,
+    "expected_loi_pct": 42.1,
+    "recycled_cao_usage_ratio_pct": 25.8
+  }},
+  "doe_rationale": "화학양론적/열역학적/반응속도론적 공학 설계 근거 (3~4문장)",
+  "procedure_recommendations": [
+    "권장 절차 1...",
+    "권장 절차 2...",
+    "권장 절차 3..."
+  ],
+  "risk_and_checkpoints": [
+    "현장 모니터링 체크포인트 1...",
+    "체크포인트 2..."
+  ]
+}}
+"""
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a world-class chemical process engineer specialized in battery-grade lithium conversion and calcium looping."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3
+        )
+        result_json = json.loads(response.choices[0].message.content)
+        return result_json, None
+    except Exception as e:
+        return None, str(e)
+
+# --------------------------------------------------------------------------
+# [4] 이메일 발송 공통 함수
 # --------------------------------------------------------------------------
 def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w, 
                       lioh_conc, li_1, ca_1, na_1, si_1, mg_1, k_1, 
@@ -198,7 +272,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
     port_num = int(st.session_state.smtp_port)
 
     if not sender or not pw:
-        return False, "발신자 계정 또는 비밀번호가 비어 있습니다. (5번 탭 확인)"
+        return False, "발신자 계정 또는 비밀번호가 비어 있습니다. (6번 탭 확인)"
 
     try:
         wb = Workbook()
@@ -284,11 +358,11 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
         return False, f"메일 발송 실패: {err_msg}"
 
 # --------------------------------------------------------------------------
-# [4] 사이드바: OpenAI API Key 설정
+# [5] 사이드바: OpenAI API Key 설정
 # --------------------------------------------------------------------------
 with st.sidebar:
-    st.header("🔑 AI Vision OCR 설정")
-    st.caption("사진 인식(GPT-4o Vision)에 사용할 API Key를 입력하세요.")
+    st.header("🔑 AI Agent 설정")
+    st.caption("AI Vision 및 자율 DoE 추천에 사용할 OpenAI API Key입니다.")
     st.session_state.openai_api_key = st.text_input(
         "OpenAI API Key", 
         value=st.session_state.openai_api_key, 
@@ -296,23 +370,24 @@ with st.sidebar:
         help="sk-... 로 시작하는 OpenAI API 키를 입력하세요."
     )
     if st.session_state.openai_api_key:
-        st.success("✅ AI Vision 준비 완료")
+        st.success("✅ AI Vision & DoE 준비 완료")
     else:
-        st.info("💡 키를 입력하면 1·2번 탭의 사진 인식 기능이 활성화됩니다.")
+        st.info("💡 키를 입력하면 사진 인식과 자율 DoE 추천 기능이 활성화됩니다.")
     st.divider()
 
 # --------------------------------------------------------------------------
-# [5] 메인 화면 및 탭 구성
+# [6] 메인 화면 및 탭 구성
 # --------------------------------------------------------------------------
 st.title(f"🧪 {AGENT_TITLE}")
-st.caption("AI Vision 사진 인식 | M/B 자동 연산 | ICP 성분별 회수율 | 회차별 거동예측 | 리포트 자동 발송")
+st.caption("AI Vision 사진 인식 | M/B 자동 연산 | ICP 성분별 회수율 | 자율 DoE 레시피 추천 | 회차별 거동예측 | 리포트 자동 발송")
 
-main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
+main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
     "1️⃣ 실험 데이터 입력 & M/B 연산", 
     "2️⃣ 🧪 용액 ICP 분석 & 회수율", 
     "3️⃣ 📈 회차별 트렌드 & 거동예측", 
-    "4️⃣ 💬 AI 공정 대화창", 
-    "5️⃣ 📧 리포트 메일 발송 및 현황"
+    "4️⃣ 🤖 자율 DoE 레시피 추천",
+    "5️⃣ 💬 AI 공정 대화창", 
+    "6️⃣ 📧 리포트 메일 발송 및 현황"
 ])
 
 # --------------------------------------------------------------------------
@@ -711,21 +786,125 @@ with main_tab3:
     st.markdown("##### 📋 회차별 실측치 & 예측 시뮬레이션 상세 데이터 테이블")
     st.dataframe(
         df_simulation.style.format({
-            "Li 회수율 (%)": "{:.2f} %",
-            "1차여액 Li농도 (mg/L)": "{:,.1f} mg/L",
-            "1차여액 LiOH농도 (g/L)": "{:.2f} g/L",
-            "M/B 닫힘율 (%)": "{:.2f} %",
-            "하소 감율 LOI (%)": "{:.2f} %",
-            "CaO 활성도 (%)": "{:.1f} %",
+            "Li 회수율 (%)": "{:.2f} %", "1차여액 Li농도 (mg/L)": "{:,.1f} mg/L",
+            "1차여액 LiOH농도 (g/L)": "{:.2f} g/L", "M/B 닫힘율 (%)": "{:.2f} %",
+            "하소 감율 LOI (%)": "{:.2f} %", "CaO 활성도 (%)": "{:.1f} %",
             "신품 CaO 보충량 (g)": "{:.2f} g"
         }),
         use_container_width=True
     )
 
 # --------------------------------------------------------------------------
-# TAB 4: 💬 AI 공정 대화창
+# TAB 4: 🤖 자율 DoE 레시피 추천 (NEW FEATURE)
 # --------------------------------------------------------------------------
 with main_tab4:
+    st.header("🤖 LLM 기반 자율 DoE 실험계획 & 차기 레시피 추천")
+    st.markdown("누적 실험 이력과 연구원의 최적화 전략을 종합 분석하여 **차기 회차 최적 배합비와 공정 조건**을 AI가 자율 설계합니다.")
+
+    col_doe1, col_doe2 = st.columns([1, 1])
+
+    with col_doe1:
+        st.markdown("#### 🎯 1. 최적화 목표 전략 선택")
+        doe_strategy = st.radio(
+            "실험 목표 전략을 선택하세요:",
+            [
+                "🎯 Li 회수율 극대화 전략 (Target: Li Recovery > 98%)",
+                "💰 원가 절감 및 Ca 순환 루프 극대화 (재생 CaO 사용률 최대화)",
+                "🔥 소결(Sintering) 억제 및 반응 활성도 보존 (하소/반응조건 최적화)",
+                "💎 초고순도 LH 생산 (여액 Ca/불순물 최소화 & 세척 최적화)",
+                "🛠️ 사용자 정의 복합 DoE 최적화"
+            ]
+        )
+
+        st.markdown("#### ⚙️ 2. 세부 제약 조건 및 타깃")
+        target_recovery_goal = st.slider("목표 Li 회수율 (%)", min_value=90.0, max_value=99.5, value=97.0, step=0.5)
+        max_recycled_target = st.slider("재생 CaO 목표 투입 비율 (%)", min_value=0.0, max_value=80.0, value=30.0, step=5.0)
+
+    with col_doe2:
+        st.markdown("#### 📝 3. 연구원 추가 요구사항 (선택)")
+        user_memo = st.text_area(
+            "특이사항 또는 고정하고 싶은 조건 (자연어로 입력):",
+            value="슬러리 점도 상승을 방지하기 위해 물 비율을 적절히 유지하고, 소결에 따른 소화 지연을 보상할 수 있는 교반 조건을 반영해줘.",
+            height=130
+        )
+
+        st.write("")
+        gen_recipe_btn = st.button("🚀 AI 자율 DoE 레시피 생성 및 설계 실행", type="primary", use_container_width=True)
+
+    if gen_recipe_btn:
+        constraints_str = f"목표 Li 회수율: {target_recovery_goal}%, 재생 CaO 목표 비율: {max_recycled_target}%"
+        with st.spinner("AI DoE 에이전트가 누적 데이터를 분석하고 최적 배합비를 설계 중입니다..."):
+            doe_res, err = generate_doe_recipe(doe_strategy, constraints_str, user_memo)
+            if err:
+                st.error(f"❌ DoE 생성 실패: {err}")
+            else:
+                st.session_state.doe_recipe_result = doe_res
+                st.success("🎉 차기 회차 최적 DoE 레시피 설계가 완료되었습니다!")
+
+    # DoE 결과 표시 영역
+    if st.session_state.doe_recipe_result is not None:
+        res = st.session_state.doe_recipe_result
+        st.divider()
+        st.subheader(f"📋 AI 설계 차기 회차 (Run {res['recommended_params']['run_no']}) 최적 레시피")
+        st.info(f"💡 **[전략 요약]** {res.get('strategy_summary', '')}")
+
+        # 핵심 KPI 예측 메트릭
+        kpis = res.get("expected_kpis", {})
+        k_c1, k_c2, k_c3, k_c4 = st.columns(4)
+        k_c1.metric("🎯 예상 Li 회수율", f"{kpis.get('expected_li_recovery_pct', 0):.1f} %")
+        k_c2.metric("🧪 예상 LiOH 농도", f"{kpis.get('expected_lioh_conc_g_l', 0):.1f} g/L")
+        k_c3.metric("🔥 예상 하소 감율(LOI)", f"{kpis.get('expected_loi_pct', 0):.1f} %")
+        k_c4.metric("♻️ 재생 CaO 사용비율", f"{kpis.get('recycled_cao_usage_ratio_pct', 0):.1f} %")
+
+        # 추천 배합비 테이블
+        p = res.get("recommended_params", {})
+        df_recipe = pd.DataFrame([
+            {"공정 파라미터": "Li₂CO₃ 투입량 (g)", "추천 설정값": p.get("li2co3_mass", 95.34), "단위": "g"},
+            {"공정 파라미터": "Li₂CO₃ 용매수 (g)", "추천 설정값": p.get("li2co3_water", 1040.0), "단위": "g"},
+            {"공정 파라미터": "신품 CaO 투입량 (g)", "추천 설정값": p.get("fresh_cao_mass", 68.52), "단위": "g"},
+            {"공정 파라미터": "재생 CaO 투입량 (g)", "추천 설정값": p.get("recycled_cao_mass", 23.90), "단위": "g"},
+            {"공정 파라미터": "슬러리 조제수 (g)", "추천 설정값": p.get("slurry_water", 831.0), "단위": "g"},
+            {"공정 파라미터": "반응 온도 (℃)", "추천 설정값": p.get("temp_c", 85.0), "단위": "℃"},
+            {"공정 파라미터": "반응 시간 (h)", "추천 설정값": p.get("time_h", 2.5), "단위": "시간"},
+            {"공정 파라미터": "케이크 수세 배수 (Ratio)", "추천 설정값": p.get("wash_sol_ratio", 3.0), "단위": "배수"},
+            {"공정 파라미터": "CaCO₃ 소성 온도 (℃)", "추천 설정값": p.get("calc_temp", 950.0), "단위": "℃"},
+            {"공정 파라미터": "CaCO₃ 소성 시간 (h)", "추천 설정값": p.get("calc_time", 1.2), "단위": "시간"},
+        ])
+
+        col_tbl, col_rat = st.columns([1, 1])
+        with col_tbl:
+            st.markdown("##### 🧪 추천 공정 운전 조건표")
+            st.dataframe(df_recipe, use_container_width=True, hide_index=True)
+
+        with col_rat:
+            st.markdown("##### 🔬 공학적 설계 근거 (DoE Rationale)")
+            st.markdown(f"> {res.get('doe_rationale', '')}")
+
+            st.markdown("##### ⚠️ 현장 모니터링 체크포인트")
+            for cp in res.get("risk_and_checkpoints", []):
+                st.markdown(f"- {cp}")
+
+        # 원클릭 1번 탭 연동 버튼
+        st.markdown("---")
+        if st.button("📋 이 추천 레시피를 1번 탭(실험 입력창)에 즉시 적용하기", type="primary", use_container_width=True):
+            st.session_state["run_no"] = int(p.get("run_no", len(st.session_state.history) + 1))
+            st.session_state["li2co3_mass"] = float(p.get("li2co3_mass", 95.34))
+            st.session_state["li2co3_water"] = float(p.get("li2co3_water", 1040.0))
+            st.session_state["fresh_cao_mass"] = float(p.get("fresh_cao_mass", 68.52))
+            st.session_state["recycled_cao_mass"] = float(p.get("recycled_cao_mass", 23.90))
+            st.session_state["slurry_water"] = float(p.get("slurry_water", 831.0))
+            st.session_state["temp_c"] = float(p.get("temp_c", 85.0))
+            st.session_state["time_h"] = float(p.get("time_h", 2.5))
+            st.session_state["calc_temp"] = float(p.get("calc_temp", 950.0))
+            st.session_state["calc_time"] = float(p.get("calc_time", 1.2))
+
+            st.toast("✅ 추천 레시피가 1번 탭에 완벽히 적용되었습니다! 1번 탭을 확인해 보세요.", icon="🎉")
+            st.success("✅ 추천 파라미터가 1번 탭 입력창에 자동 주입되었습니다! [1번 탭]으로 이동하여 연산 결과를 확인하세요.")
+
+# --------------------------------------------------------------------------
+# TAB 5: 💬 AI 공정 대화창
+# --------------------------------------------------------------------------
+with main_tab5:
     st.header("💬 AI 공정 엔지니어와 대화하기")
     st.caption("현재 실험 수치, ICP 분석 결과, $n$회차 시뮬레이션을 바탕으로 실시간 질의응답을 진행합니다.")
 
@@ -753,9 +932,9 @@ with main_tab4:
             st.markdown(ai_reply)
 
 # --------------------------------------------------------------------------
-# TAB 5: 📧 리포트 메일 발송 현황 & 연결 테스트
+# TAB 6: 📧 리포트 메일 발송 현황 & 연결 테스트
 # --------------------------------------------------------------------------
-with main_tab5:
+with main_tab6:
     st.header("📧 리포트 메일 발송 현황 & 계정 설정")
     st.caption("실험 데이터 저장 시 자동으로 발송된 이메일 현황 목록을 모니터링하고 발송 설정을 관리합니다.")
 
