@@ -23,12 +23,53 @@ MW_SI = 28.09
 MW_MG = 24.31
 MW_K = 39.10
 
-# 에이전트 제목 설정
 AGENT_TITLE = "LC-LH전환반응 M/B자동화 및 거동예측 Agent tool"
 
 st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
 
-# 세션 상태 초기화
+# --------------------------------------------------------------------------
+# [1] 기본 세션 상태 및 변수 초기화
+# --------------------------------------------------------------------------
+DEFAULT_DATA = {
+    "run_no": 1,
+    "li2co3_mass": 95.34,
+    "li2co3_water": 1040.0,
+    "fresh_cao_mass": 92.42,
+    "recycled_cao_mass": 0.0,
+    "slurry_water": 831.0,
+    "temp_c": 80.0,
+    "time_h": 2.0,
+    "primary_filtrate_mass": 1646.0,
+    "primary_filtrate_sg": 1.035,
+    "primary_filtrate_ph": 12.81,
+    "wet_cake_mass": 311.0,
+    "sample_wet": 27.7,
+    "sample_dry": 14.8,
+    "wash_sol_mass": 832.0,
+    "wash_sol_sg": 1.000,
+    "wash_sol_ph": 13.70,
+    "test_dry_cake": 40.6,
+    "calcined_cao": 23.9,
+    "calc_temp": 1000.0,
+    "calc_time": 1.0,
+    "icp_li_1": 10500.0,
+    "icp_ca_1": 120.0,
+    "icp_na_1": 45.0,
+    "icp_si_1": 8.5,
+    "icp_mg_1": 1.2,
+    "icp_k_1": 15.0,
+    "icp_li_w": 1400.0,
+    "icp_ca_w": 80.0,
+    "icp_na_w": 6.0,
+    "icp_si_w": 2.1,
+    "icp_mg_w": 0.3,
+    "icp_k_w": 2.0,
+}
+
+for k, v in DEFAULT_DATA.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
 if "history" not in st.session_state:
     st.session_state.history = pd.DataFrame([
         {
@@ -49,10 +90,127 @@ if "chat_messages" not in st.session_state:
         {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 탄산리튬(LC)에서 수산화리튬(LH)으로의 가성화 M/B 연산, ICP 불순물 분석, 회차별 거동예측에 대해 무엇이든 질문해 주세요."}
     ]
 
+# 키패드 매핑 사전 (한글 라벨 -> 세션 변수명)
+FIELD_MAP = {
+    "Li₂CO₃ 투입량 (g)": "li2co3_mass",
+    "Li₂CO₃ 용매수 (g)": "li2co3_water",
+    "신품 CaO 투입량 (g)": "fresh_cao_mass",
+    "재생 CaO 투입량 (g)": "recycled_cao_mass",
+    "슬러리 조제수 (g)": "slurry_water",
+    "반응 온도 (℃)": "temp_c",
+    "반응 시간 (h)": "time_h",
+    "1차 여액 무게 (g)": "primary_filtrate_mass",
+    "1차 여액 비중 (g/mL)": "primary_filtrate_sg",
+    "1차 여액 pH": "primary_filtrate_ph",
+    "1차 습케이크 무게 (g)": "wet_cake_mass",
+    "함수율 샘플 습중량 (g)": "sample_wet",
+    "함수율 샘플 건중량 (g)": "sample_dry",
+    "수세액 무게 (g)": "wash_sol_mass",
+    "수세액 pH": "wash_sol_ph",
+    "소성 투입 건조케익 (g)": "test_dry_cake",
+    "소성 회수 CaO (g)": "calcined_cao",
+    "1차여액 Li 농도 (mg/L)": "icp_li_1",
+    "1차여액 Ca 농도 (mg/L)": "icp_ca_1",
+    "1차여액 Na 농도 (mg/L)": "icp_na_1",
+    "1차여액 Si 농도 (mg/L)": "icp_si_1",
+    "1차여액 Mg 농도 (mg/L)": "icp_mg_1",
+    "1차여액 K 농도 (mg/L)": "icp_k_1",
+    "수세액 Li 농도 (mg/L)": "icp_li_w",
+    "수세액 Ca 농도 (mg/L)": "icp_ca_w",
+    "수세액 Na 농도 (mg/L)": "icp_na_w",
+    "수세액 Si 농도 (mg/L)": "icp_si_w",
+    "수세액 Mg 농도 (mg/L)": "icp_mg_w",
+    "수세액 K 농도 (mg/L)": "icp_k_w"
+}
+
+if "keypad_target" not in st.session_state:
+    st.session_state.keypad_target = "Li₂CO₃ 투입량 (g)"
+if "keypad_buffer" not in st.session_state:
+    st.session_state.keypad_buffer = str(st.session_state[FIELD_MAP[st.session_state.keypad_target]])
+
+def update_keypad_target():
+    st.session_state.keypad_buffer = str(st.session_state[FIELD_MAP[st.session_state.keypad_target]])
+
+# --------------------------------------------------------------------------
+# [2] 사이드바: 가상 계산기 키패드
+# --------------------------------------------------------------------------
+with st.sidebar:
+    st.header("🧮 마우스 전용 가상 키패드")
+    st.caption("터치나 마우스 클릭으로 수치를 빠르게 입력하고 즉시 적용할 수 있습니다.")
+    
+    target_label = st.selectbox(
+        "📌 입력할 항목 선택:", 
+        list(FIELD_MAP.keys()), 
+        key="keypad_target", 
+        on_change=update_keypad_target
+    )
+    target_var = FIELD_MAP[target_label]
+
+    # LCD 스타일 표시창
+    st.markdown(
+        f"""
+        <div style="background-color: #1E293B; color: #38BDF8; font-family: monospace; 
+                    font-size: 26px; font-weight: bold; text-align: right; 
+                    padding: 10px 14px; border-radius: 8px; border: 2px solid #0EA5E9; margin-bottom: 10px;">
+            {st.session_state.keypad_buffer if st.session_state.keypad_buffer else "0"}
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+
+    # 키패드 버튼 그리드 (4x4)
+    r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+    if r1_c1.button("7", use_container_width=True): st.session_state.keypad_buffer += "7"; st.rerun()
+    if r1_c2.button("8", use_container_width=True): st.session_state.keypad_buffer += "8"; st.rerun()
+    if r1_c3.button("9", use_container_width=True): st.session_state.keypad_buffer += "9"; st.rerun()
+    if r1_c4.button("⌫", help="한 글자 지우기", use_container_width=True): 
+        st.session_state.keypad_buffer = st.session_state.keypad_buffer[:-1]
+        st.rerun()
+
+    r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
+    if r2_c1.button("4", use_container_width=True): st.session_state.keypad_buffer += "4"; st.rerun()
+    if r2_c2.button("5", use_container_width=True): st.session_state.keypad_buffer += "5"; st.rerun()
+    if r2_c3.button("6", use_container_width=True): st.session_state.keypad_buffer += "6"; st.rerun()
+    if r2_c4.button("C", help="전체 지우기", use_container_width=True): 
+        st.session_state.keypad_buffer = ""
+        st.rerun()
+
+    r3_c1, r3_c2, r3_c3, r3_c4 = st.columns(4)
+    if r3_c1.button("1", use_container_width=True): st.session_state.keypad_buffer += "1"; st.rerun()
+    if r3_c2.button("2", use_container_width=True): st.session_state.keypad_buffer += "2"; st.rerun()
+    if r3_c3.button("3", use_container_width=True): st.session_state.keypad_buffer += "3"; st.rerun()
+    if r3_c4.button("00", use_container_width=True): st.session_state.keypad_buffer += "00"; st.rerun()
+
+    r4_c1, r4_c2, r4_c3, r4_c4 = st.columns(4)
+    if r4_c1.button("0", use_container_width=True): st.session_state.keypad_buffer += "0"; st.rerun()
+    if r4_c2.button(".", use_container_width=True): 
+        if "." not in st.session_state.keypad_buffer:
+            st.session_state.keypad_buffer += "."
+        st.rerun()
+    if r4_c3.button("±", use_container_width=True):
+        if st.session_state.keypad_buffer.startswith("-"):
+            st.session_state.keypad_buffer = st.session_state.keypad_buffer[1:]
+        else:
+            st.session_state.keypad_buffer = "-" + st.session_state.keypad_buffer
+        st.rerun()
+    if r4_c4.button("💾", help="입력값 적용 (Enter)", type="primary", use_container_width=True):
+        try:
+            val = float(st.session_state.keypad_buffer) if st.session_state.keypad_buffer else 0.0
+            st.session_state[target_var] = val
+            st.success(f"✅ '{target_label}'에 {val} 적용 완료!")
+            st.rerun()
+        except ValueError:
+            st.error("유효한 숫자가 아닙니다.")
+
+    st.divider()
+    st.info("💡 사이드바의 번호판을 누르고 [💾] 버튼을 누르면 본문 화면의 입력창에 즉시 입력됩니다.")
+
+# --------------------------------------------------------------------------
+# [3] 메인 화면 및 탭 구성
+# --------------------------------------------------------------------------
 st.title(f"🧪 {AGENT_TITLE}")
 st.caption("탄산리튬(LC) → 수산화리튬(LH) 가성화 양론 연산 | ICP 성분별 회수율 및 불순물 분석 | 회차별 거동예측 | 리포트 메일 발송")
 
-# 상단 탭 구성
 main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
     "1️⃣ 실험 데이터 입력 & M/B 연산", 
     "2️⃣ 🧪 용액 ICP 분석 & 회수율", 
@@ -62,46 +220,45 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
 ])
 
 # --------------------------------------------------------------------------
-# TAB 1: 실험 데이터 입력 및 기초 M/B 연산
+# TAB 1: 실험 데이터 입력 및 M/B 연산
 # --------------------------------------------------------------------------
 with main_tab1:
-    with st.expander("📝 이번 회차 실험 수치 입력 폼", expanded=True):
-        # 1. 상단: 투입 원료 vs 1차 여과 및 케이크 수세
+    with st.expander("📝 이번 회차 실험 수치 입력 폼 (키보드 직접 입력도 가능)", expanded=True):
         col_in1, col_in2 = st.columns(2)
         with col_in1:
             st.markdown("#### [1. 투입 원료 및 반응 조건]")
-            run_no = st.number_input("실험 회차 (Run No.)", min_value=1, value=len(st.session_state.history), step=1)
-            li2co3_mass = st.number_input("Li₂CO₃ 투입량 (g)", value=95.34, format="%.2f")
-            li2co3_water = st.number_input("Li₂CO₃ 용매수 (g)", value=1040.0, format="%.1f")
-            fresh_cao_mass = st.number_input("신품 CaO 투입량 (g)", value=92.42 if run_no == 1 else 68.52, format="%.2f")
-            recycled_cao_mass = st.number_input("재생 CaO 투입량 (g)", value=0.0 if run_no == 1 else 23.90, format="%.2f")
-            slurry_water = st.number_input("슬러리 조제수 (g)", value=831.0, format="%.1f")
-            temp_c = st.number_input("반응 온도 (℃)", value=80.0, format="%.1f")
-            time_h = st.number_input("반응 시간 (시간)", value=2.0, format="%.1f")
+            run_no = st.number_input("실험 회차 (Run No.)", min_value=1, value=int(st.session_state["run_no"]), step=1, key="run_no")
+            li2co3_mass = st.number_input("Li₂CO₃ 투입량 (g)", format="%.2f", key="li2co3_mass")
+            li2co3_water = st.number_input("Li₂CO₃ 용매수 (g)", format="%.1f", key="li2co3_water")
+            fresh_cao_mass = st.number_input("신품 CaO 투입량 (g)", format="%.2f", key="fresh_cao_mass")
+            recycled_cao_mass = st.number_input("재생 CaO 투입량 (g)", format="%.2f", key="recycled_cao_mass")
+            slurry_water = st.number_input("슬러리 조제수 (g)", format="%.1f", key="slurry_water")
+            temp_c = st.number_input("반응 온도 (℃)", format="%.1f", key="temp_c")
+            time_h = st.number_input("반응 시간 (시간)", format="%.1f", key="time_h")
 
         with col_in2:
             st.markdown("#### [2. 1차 여과 및 케이크 수세]")
-            primary_filtrate_mass = st.number_input("1차 LiOH 여액 무게 (g)", value=1646.0, format="%.1f")
-            primary_filtrate_sg = st.number_input("1차 여액 비중 (g/mL)", value=1.035, format="%.3f")
-            primary_filtrate_ph = st.number_input("1차 여액 pH", value=12.81, format="%.2f")
-            wet_cake_mass = st.number_input("1차 습케이크 무게 (g)", value=311.0, format="%.1f")
-            sample_wet = st.number_input("함수율 측정 샘플 습중량 (g)", value=27.7, format="%.1f")
-            sample_dry = st.number_input("함수율 측정 샘플 건중량 (g)", value=14.8, format="%.1f")
-            wash_sol_mass = st.number_input("회수된 수세액 무게 (g)", value=832.0, format="%.1f")
-            wash_sol_sg = st.number_input("수세액 비중 (g/mL)", value=1.000, format="%.3f")
-            wash_sol_ph = st.number_input("수세액 pH", value=13.70, format="%.2f")
+            primary_filtrate_mass = st.number_input("1차 LiOH 여액 무게 (g)", format="%.1f", key="primary_filtrate_mass")
+            primary_filtrate_sg = st.number_input("1차 여액 비중 (g/mL)", format="%.3f", key="primary_filtrate_sg")
+            primary_filtrate_ph = st.number_input("1차 여액 pH", format="%.2f", key="primary_filtrate_ph")
+            wet_cake_mass = st.number_input("1차 습케이크 무게 (g)", format="%.1f", key="wet_cake_mass")
+            sample_wet = st.number_input("함수율 측정 샘플 습중량 (g)", format="%.1f", key="sample_wet")
+            sample_dry = st.number_input("함수율 측정 샘플 건중량 (g)", format="%.1f", key="sample_dry")
+            wash_sol_mass = st.number_input("회수된 수세액 무게 (g)", format="%.1f", key="wash_sol_mass")
+            wash_sol_sg = st.number_input("수세액 비중 (g/mL)", format="%.3f", key="wash_sol_sg")
+            wash_sol_ph = st.number_input("수세액 pH", format="%.2f", key="wash_sol_ph")
 
         st.divider()
 
-        # 2. 하단: 소성(하소) 및 CaO 재생 (여과/수세 아래에 별도 배치)
+        # 소성 분리 배치
         st.markdown("#### [3. CaCO₃ 소성(하소) 및 CaO 재생]")
         col_calc1, col_calc2 = st.columns(2)
         with col_calc1:
-            test_dry_cake = st.number_input("소성 투입 건조케익 샘플 (g)", value=40.6, format="%.1f")
-            calcined_cao = st.number_input("소성 후 회수된 CaO (g)", value=23.9, format="%.1f")
+            test_dry_cake = st.number_input("소성 투입 건조케익 샘플 (g)", format="%.1f", key="test_dry_cake")
+            calcined_cao = st.number_input("소성 후 회수된 CaO (g)", format="%.1f", key="calcined_cao")
         with col_calc2:
-            calc_temp = st.number_input("소성 온도 (℃)", value=1000.0, format="%.1f")
-            calc_time = st.number_input("소성 시간 (시간)", value=1.0, format="%.1f")
+            calc_temp = st.number_input("소성 온도 (℃)", format="%.1f", key="calc_temp")
+            calc_time = st.number_input("소성 시간 (시간)", format="%.1f", key="calc_time")
 
     # M/B 기본 연산 로직
     n_li2co3 = li2co3_mass / MW_LI2CO3
@@ -115,14 +272,14 @@ with main_tab1:
     total_out = primary_filtrate_mass + wet_cake_mass
     loss_mass = total_in - total_out
     mass_closure = (total_out / total_in) * 100.0
-    cake_moisture = (1.0 - (sample_dry / sample_wet)) * 100.0
-    est_total_dry_solids = wet_cake_mass * (sample_dry / sample_wet)
+    cake_moisture = (1.0 - (sample_dry / sample_wet)) * 100.0 if sample_wet > 0 else 0.0
+    est_total_dry_solids = wet_cake_mass * (sample_dry / sample_wet) if sample_wet > 0 else 0.0
 
-    loi_pct = ((test_dry_cake - calcined_cao) / test_dry_cake) * 100.0
-    cao_yield_dry = (calcined_cao / test_dry_cake) * 100.0
+    loi_pct = ((test_dry_cake - calcined_cao) / test_dry_cake) * 100.0 if test_dry_cake > 0 else 0.0
+    cao_yield_dry = (calcined_cao / test_dry_cake) * 100.0 if test_dry_cake > 0 else 0.0
     purity_caco3 = max(0.0, min(100.0, ((loi_pct/100.0) - 0.2432) / (0.4397 - 0.2432) * 100.0))
     pot_total_cao = est_total_dry_solids * (cao_yield_dry / 100.0)
-    ca_loop_recovery = (pot_total_cao / total_cao_in) * 100.0
+    ca_loop_recovery = (pot_total_cao / total_cao_in) * 100.0 if total_cao_in > 0 else 0.0
 
     target_cao = 92.42
     fresh_makeup = max(0.0, target_cao - calcined_cao)
@@ -135,46 +292,42 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 용액 ICP 분석 (mg/L 단위 표기 & 하단 회수율 자동 계산)
+# TAB 2: 🧪 용액 ICP 분석 (mg/L 단위 & 하단 회수율 자동 계산)
 # --------------------------------------------------------------------------
 with main_tab2:
     st.header("🧪 용액 ICP 분석 데이터 입력 및 회수율 계산")
     st.markdown("1차 여액 및 수세액의 각 성분 농도(**mg/L**)를 입력하면, **투입량 대비 리튬 회수율과 성분별 물질수지**를 하단에 즉시 계산합니다.")
 
-    # [1] ICP 농도 입력 폼 (2개 컬럼, 각 항목에 mg/L 명시)
     st.markdown("### 1. ICP 분석 데이터 입력")
     icp_col1, icp_col2 = st.columns(2)
 
     with icp_col1:
         st.markdown(f"#### 🔹 1차 여액 분석치 (부피: {primary_filtrate_mass/primary_filtrate_sg:.1f} mL)")
-        icp_li_1 = st.number_input("Li 농도 (mg/L) - 1차 여액", value=10500.0, step=50.0, format="%.1f")
-        icp_ca_1 = st.number_input("Ca 농도 (mg/L) - 1차 여액", value=120.0, step=5.0, format="%.1f")
-        icp_na_1 = st.number_input("Na 농도 (mg/L) - 1차 여액", value=45.0, step=1.0, format="%.1f")
-        icp_si_1 = st.number_input("Si 농도 (mg/L) - 1차 여액", value=8.5, step=0.5, format="%.1f")
-        icp_mg_1 = st.number_input("Mg 농도 (mg/L) - 1차 여액", value=1.2, step=0.1, format="%.1f")
-        icp_k_1  = st.number_input("K 농도 (mg/L) - 1차 여액", value=15.0, step=1.0, format="%.1f")
+        icp_li_1 = st.number_input("Li 농도 (mg/L) - 1차 여액", format="%.1f", key="icp_li_1")
+        icp_ca_1 = st.number_input("Ca 농도 (mg/L) - 1차 여액", format="%.1f", key="icp_ca_1")
+        icp_na_1 = st.number_input("Na 농도 (mg/L) - 1차 여액", format="%.1f", key="icp_na_1")
+        icp_si_1 = st.number_input("Si 농도 (mg/L) - 1차 여액", format="%.1f", key="icp_si_1")
+        icp_mg_1 = st.number_input("Mg 농도 (mg/L) - 1차 여액", format="%.1f", key="icp_mg_1")
+        icp_k_1  = st.number_input("K 농도 (mg/L) - 1차 여액", format="%.1f", key="icp_k_1")
 
     with icp_col2:
         st.markdown(f"#### 🔹 수세액 분석치 (부피: {wash_sol_mass/wash_sol_sg:.1f} mL)")
-        icp_li_w = st.number_input("Li 농도 (mg/L) - 수세액", value=1400.0, step=50.0, format="%.1f")
-        icp_ca_w = st.number_input("Ca 농도 (mg/L) - 수세액", value=80.0, step=5.0, format="%.1f")
-        icp_na_w = st.number_input("Na 농도 (mg/L) - 수세액", value=6.0, step=1.0, format="%.1f")
-        icp_si_w = st.number_input("Si 농도 (mg/L) - 수세액", value=2.1, step=0.5, format="%.1f")
-        icp_mg_w = st.number_input("Mg 농도 (mg/L) - 수세액", value=0.3, step=0.1, format="%.1f")
-        icp_k_w  = st.number_input("K 농도 (mg/L) - 수세액", value=2.0, step=1.0, format="%.1f")
+        icp_li_w = st.number_input("Li 농도 (mg/L) - 수세액", format="%.1f", key="icp_li_w")
+        icp_ca_w = st.number_input("Ca 농도 (mg/L) - 수세액", format="%.1f", key="icp_ca_w")
+        icp_na_w = st.number_input("Na 농도 (mg/L) - 수세액", format="%.1f", key="icp_na_w")
+        icp_si_w = st.number_input("Si 농도 (mg/L) - 수세액", format="%.1f", key="icp_si_w")
+        icp_mg_w = st.number_input("Mg 농도 (mg/L) - 수세액", format="%.1f", key="icp_mg_w")
+        icp_k_w  = st.number_input("K 농도 (mg/L) - 수세액", format="%.1f", key="icp_k_w")
 
     st.divider()
 
-    # [2] 회수율 및 성분 질량 자동 계산 (입력창 바로 아래 위치)
+    # 하단 회수율 연산
     st.markdown("### 2. 성분별 질량 및 회수율 계산 결과")
 
     v1_L = (primary_filtrate_mass / primary_filtrate_sg) / 1000.0
     vw_L = (wash_sol_mass / wash_sol_sg) / 1000.0
-
-    # Li 총 투입량
     li_in_total_g = n_li2co3 * 2.0 * MW_LI
 
-    # 각 성분별 회수 질량 (g) = 농도(mg/L) * 부피(L) / 1000
     elements = ["Li", "Ca", "Na", "Si", "Mg", "K"]
     conc_1 = [icp_li_1, icp_ca_1, icp_na_1, icp_si_1, icp_mg_1, icp_k_1]
     conc_w = [icp_li_w, icp_ca_w, icp_na_w, icp_si_w, icp_mg_w, icp_k_w]
@@ -183,21 +336,18 @@ with main_tab2:
     mass_w_g = [c * vw_L / 1000.0 for c in conc_w]
     mass_total_g = [m1 + mw for m1, mw in zip(mass_1_g, mass_w_g)]
 
-    # 리튬 세부 회수율 계산
     li_rec_1_pct = (mass_1_g[0] / li_in_total_g) * 100.0 if li_in_total_g > 0 else 0.0
     li_rec_w_pct = (mass_w_g[0] / li_in_total_g) * 100.0 if li_in_total_g > 0 else 0.0
     total_li_rec_pct = li_rec_1_pct + li_rec_w_pct
     li_loss_pct = max(0.0, 100.0 - total_li_rec_pct)
     lioh_equiv_g_l = icp_li_1 * (MW_LIOH / MW_LI) / 1000.0
 
-    # 메트릭 카드
     rc1, rc2, rc3, rc4 = st.columns(4)
     rc1.metric("🎯 총 Li 회수율", f"{total_li_rec_pct:.2f} %", f"총 회수: {mass_total_g[0]:.2f}g / 투입: {li_in_total_g:.2f}g")
     rc2.metric("1차 여액 회수율", f"{li_rec_1_pct:.2f} %", f"회수 질량: {mass_1_g[0]:.2f}g")
     rc3.metric("수세액 회수율", f"{li_rec_w_pct:.2f} %", f"회수 질량: {mass_w_g[0]:.2f}g")
     rc4.metric("케이크 잔류/손실률", f"{li_loss_pct:.2f} %", f"미회수: {li_in_total_g - mass_total_g[0]:.2f}g", delta_color="inverse")
 
-    # 성분별 분석 종합 표
     df_icp_summary = pd.DataFrame({
         "원소 (Element)": elements,
         "1차 여액 농도 (mg/L)": conc_1,
@@ -223,23 +373,6 @@ with main_tab2:
         use_container_width=True
     )
 
-    # AI ICP 진단 코멘트
-    st.markdown("##### 🤖 ICP 분석 기반 AI 공정 진단")
-    icp_diags = []
-    if icp_ca_1 > 200.0:
-        icp_diags.append(f"여액 내 Ca 농도가 {icp_ca_1:.1f} mg/L로 높습니다. CaO 과잉 또는 미세 고형분 유출 가능성이 있으므로 탄산화(Carbonation) 탈칼슘 후처리가 필요합니다.")
-    if li_rec_w_pct > 10.0:
-        icp_diags.append(f"수세액에서 전체 리튬의 {li_rec_w_pct:.1f}%가 회수되었습니다. 케이크 여과 탈수 효율을 높여 1차 여액 회수율을 극대화할 필요가 있습니다.")
-    if icp_na_1 > 50.0 or icp_k_1 > 20.0:
-        icp_diags.append(f"알칼리 불순물(Na: {icp_na_1} mg/L, K: {icp_k_1} mg/L)은 수용성이 높아 여액에 100% 잔류하므로, 농축/결정화 단계 전 원료 순도 관리가 요구됩니다.")
-
-    if not icp_diags:
-        icp_diags.append("모든 불순물(Ca, Na, Si, Mg, K) 수치와 Li 회수율이 정상 관리 범위 내에 있습니다.")
-
-    for d in icp_diags:
-        st.info(f"💡 {d}")
-
-    # 트렌드 DB에 분석 결과 반영
     if st.button("💾 이 분석 결과를 트렌드 DB에 최종 저장하기", type="primary"):
         new_row = {
             "회차 (Run)": int(run_no),
@@ -408,13 +541,11 @@ with main_tab5:
                 ws1.append(["M/B 정합성", round(mass_closure, 2), "%", f"증발 {loss_mass:.1f}g"])
                 ws1.append(["소성 감율(LOI)", round(loi_pct, 2), "%", f"CaCO3 순도 ~{purity_caco3:.1f}%"])
 
-                # ICP 분석 시트 추가
                 ws2 = wb.create_sheet(title="ICP_원소분석")
                 ws2.append(list(df_icp_summary.columns))
                 for _, r in df_icp_summary.iterrows():
                     ws2.append(list(r.values))
 
-                # 트렌드 시뮬레이션 시트 추가
                 ws3 = wb.create_sheet(title="트렌드시뮬레이션")
                 ws3.append(list(df_simulation.columns))
                 for _, r in df_simulation.iterrows():
