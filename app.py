@@ -74,7 +74,6 @@ for k, v in DEFAULT_DATA.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-# Secrets에 저장된 GEMINI_API_KEY 자동 로드
 secret_key = ""
 try:
     if "GEMINI_API_KEY" in st.secrets:
@@ -121,16 +120,40 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] Google Gemini Vision OCR 분석 함수
+# [2] Gemini 스마트 모델 자동 감지 함수 (404 방지)
 # --------------------------------------------------------------------------
+def get_best_gemini_model(api_key):
+    genai.configure(api_key=api_key)
+    try:
+        available_models = [
+            m.name.replace("models/", "") 
+            for m in genai.list_models() 
+            if "generateContent" in m.supported_generation_methods
+        ]
+        priority_list = [
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-exp",
+            "gemini-1.5-pro",
+            "gemini-pro"
+        ]
+        for p in priority_list:
+            if p in available_models:
+                return genai.GenerativeModel(p)
+        if available_models:
+            return genai.GenerativeModel(available_models[0])
+    except Exception:
+        pass
+    return genai.GenerativeModel("gemini-1.5-flash-latest")
+
 def parse_image_with_vision(image_bytes, doc_type="lab_note"):
     api_key = st.session_state.gemini_api_key.strip()
     if not api_key:
         return None, "사이드바에 Google Gemini API Key를 입력하거나 Secrets에 등록해 주세요."
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = get_best_gemini_model(api_key)
         img = Image.open(io.BytesIO(image_bytes))
 
         if doc_type == "lab_note":
@@ -752,9 +775,7 @@ with main_tab4:
         else:
             with st.spinner(f"Gemini AI가 과거 {len(st.session_state.history)}개 회차 데이터와 공정 반응 속도론을 분석 중입니다..."):
                 try:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel("gemini-1.5-flash")
-
+                    model = get_best_gemini_model(api_key)
                     history_summary = st.session_state.history.to_dict(orient="records")
 
                     doe_prompt = f"""
@@ -803,7 +824,6 @@ with main_tab4:
                 except Exception as e:
                     st.error(f"❌ DoE 생성 실패: {e}")
 
-    # 생성된 DoE 결과 표시
     if "latest_doe" in st.session_state and st.session_state.latest_doe:
         doe = st.session_state.latest_doe
         rec = doe.get("recipe", {})
@@ -865,11 +885,10 @@ with main_tab5:
         api_key = st.session_state.gemini_api_key.strip()
         if api_key:
             try:
-                genai.configure(api_key=api_key)
-                chat_model = genai.GenerativeModel("gemini-1.5-flash")
+                chat_model = get_best_gemini_model(api_key)
                 context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
 현재 공정 데이터:
-- Li 회수율: {total_li_rec_pct:.2f}% (1차 여액 {li_rec_1_pct:.1f}%, 수세액 {li_rec_w_pct:.1f}%)
+- Li 회수율: {total_li_rec_pct:.2f}% (1차 여액 {li_rec_1_pct:.1f}% + 수세액 {li_rec_w_pct:.1f}%)
 - 1차 여액 LiOH 농도: {lioh_equiv_g_l:.2f} g/L, Ca: {icp_ca_1} mg/L, Na: {icp_na_1} mg/L
 - LOI: {loi_pct:.2f}%, M/B 정합성: {mass_closure:.2f}%
 
