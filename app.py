@@ -150,7 +150,7 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
   "test_dry_cake": number,
   "calcined_cao": number
 }"""
-        else: # icp_report
+        else:
             prompt = """이 이미지는 용액 ICP 분석 기기 화면 또는 시험 성적서 인쇄물입니다.
 1차 여액(Primary Filtrate)과 수세액(Wash Solution)의 Li, Ca, Na, Si, Mg, K 농도(mg/L)를 추출하여 아래 JSON 포맷으로만 반환해 주세요.
 단위는 제외하고 순수 숫자만 넣어주세요. 판독할 수 없는 항목은 null로 설정하세요.
@@ -246,6 +246,10 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
             <li><b>소성 감율(LOI):</b> {loi:.2f}% (CaCO₃ 추정 순도: {purity:.1f}%)</li>
             <li><b>차기(Run {run_num+1}) 신품 CaO 보충량:</b> {makeup:.2f}g</li>
         </ul>
+        <h4>🧪 주요 불순물 농도 (1차 여액)</h4>
+        <ul>
+            <li>Ca: {ca_1} mg/L | Na: {na_1} mg/L | Si: {si_1} mg/L | Mg: {mg_1} mg/L | K: {k_1} mg/L</li>
+        </ul>
         <p>※ 세부 분석 데이터 엑셀 파일(<b>{file_name}</b>)을 첨부하였습니다.</p>
         """
         msg.attach(MIMEText(html_body, "html", "utf-8"))
@@ -312,10 +316,9 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
 ])
 
 # --------------------------------------------------------------------------
-# TAB 1: 실험 데이터 입력 및 기초 M/B 연산 (AI Vision OCR 탑재)
+# TAB 1: 실험 데이터 입력 및 기초 M/B 연산
 # --------------------------------------------------------------------------
 with main_tab1:
-    # 📷 [AI Vision] 수기 실험 일지 사진 인식 확장 패널
     with st.expander("📷 [AI Vision] 수기 실험 노트/기록지 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
         col_img1, col_img2 = st.columns([2, 1])
         with col_img1:
@@ -410,13 +413,12 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 용액 ICP 분석 (AI Vision 사진 인식 & 엑셀 업로드)
+# TAB 2: 🧪 용액 ICP 분석
 # --------------------------------------------------------------------------
 with main_tab2:
     st.header("🧪 용액 ICP 분석 데이터 입력 및 회수율 계산")
     st.markdown("분석실 **성적서 사진(AI Vision)** 또는 **엑셀 파일**을 업로드하면 성분값이 자동 채워집니다.")
 
-    # 📷 [AI Vision] ICP 성적서 / 기기 화면 사진 인식
     with st.expander("📷 [AI Vision] ICP 성적서 / 기기 화면 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
         col_icp_img1, col_icp_img2 = st.columns([2, 1])
         with col_icp_img1:
@@ -442,7 +444,6 @@ with main_tab2:
                             st.success("🎉 ICP 성분값(Li, Ca, Na, Si, Mg, K) 판독 및 자동 반영 완료!")
                             st.rerun()
 
-    # 📂 엑셀 파일 업로드
     with st.container():
         col_up1, col_up2 = st.columns([3, 1])
         with col_up1:
@@ -612,4 +613,248 @@ with main_tab2:
             "Li 회수율 (%)": round(total_li_rec_pct, 2), 
             "1차여액 Li농도 (mg/L)": round(icp_li_1, 1),
             "1차여액 LiOH농도 (g/L)": round(lioh_equiv_g_l, 2),
-            "M/B 닫힘
+            "M/B 닫힘율 (%)": round(mass_closure, 2), 
+            "하소 감율 LOI (%)": round(loi_pct, 2), 
+            "CaO 활성도 (%)": 100.0,
+            "신품 CaO 보충량 (g)": round(fresh_makeup, 2)
+        }
+        st.session_state.history = st.session_state.history[st.session_state.history["회차 (Run)"] != run_no]
+        st.session_state.history = pd.concat([st.session_state.history, pd.DataFrame([new_row])]).sort_values("회차 (Run)").reset_index(drop=True)
+        st.success(f"✅ Run {run_no} ICP 분석 데이터가 트렌드 DB에 영구 등록되었습니다!")
+
+        if st.session_state.auto_email_on_save:
+            ok, msg_res = send_email_report(
+                run_num=run_no, mass_cls=mass_closure, loss_m=loss_mass,
+                li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
+                lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
+                si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
+                purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+                df_icp_tbl=df_icp_summary, df_sim_tbl=None, is_auto=True
+            )
+            if ok:
+                st.toast(f"📧 리포트 메일 자동 발송 완료!", icon="🎉")
+                st.success(f"📧 **[자동 발송 성공]** {msg_res}")
+            else:
+                st.warning(f"⚠️ **[자동 발송 미완료]** {msg_res}")
+
+# --------------------------------------------------------------------------
+# TAB 3: 📈 회차별 트렌드 & 거동예측
+# --------------------------------------------------------------------------
+with main_tab3:
+    st.header("📈 $n$회차 트렌드 시각화 & 거동예측 시뮬레이터")
+    
+    with st.expander("⚙️ 거동예측 시뮬레이션 파라미터 설정 (What-If Simulation)", expanded=True):
+        col_p1, col_p2, col_p3 = st.columns(3)
+        with col_p1:
+            target_max_run = st.slider("예측 시뮬레이션 목표 회차", min_value=3, max_value=20, value=10, step=1)
+            sintering_decay = st.slider("회차당 CaO 소결 활성도 감쇄율 (%)", min_value=0.5, max_value=8.0, value=3.5, step=0.1)
+        with col_p2:
+            sim_temp = st.number_input("가상 반응 온도 (℃)", min_value=60.0, max_value=95.0, value=80.0, step=1.0)
+            sim_time = st.number_input("가상 반응 시간 (h)", min_value=1.0, max_value=5.0, value=2.0, step=0.5)
+        with col_p3:
+            wash_ratio = st.slider("수세수 투입 배수 (케이크 대비)", min_value=1.0, max_value=5.0, value=3.0, step=0.5)
+            fresh_makeup_mode = st.selectbox("CaO 보충 방식", ["고정량 보충 (전회차 감량분 100% Make-up)", "신품 100% 교체 (Purge)"])
+
+    sim_rows = []
+    base_li_conc = icp_li_1 if 'icp_li_1' in locals() else 10500.0
+    base_recovery = total_li_rec_pct if 'total_li_rec_pct' in locals() and total_li_rec_pct > 0 else 95.80
+
+    temp_factor = 1.0 + (sim_temp - 80.0) * 0.004
+    time_factor = 1.0 + (sim_time - 2.0) * 0.03
+
+    for r in range(1, target_max_run + 1):
+        matched_actual = st.session_state.history[st.session_state.history["회차 (Run)"] == r]
+        
+        if not matched_actual.empty:
+            row = matched_actual.iloc[0].to_dict()
+            sim_rows.append(row)
+        else:
+            activity = 100.0 * ((1.0 - (sintering_decay / 100.0)) ** (r - 1))
+            eff_activity = min(100.0, activity * temp_factor * time_factor)
+            
+            pred_rec = max(70.0, min(99.0, base_recovery * (eff_activity / 100.0)))
+            pred_li_conc = max(7000.0, base_li_conc * (pred_rec / base_recovery))
+            pred_lioh_conc = round(pred_li_conc * (MW_LIOH / MW_LI) / 1000.0, 2)
+            pred_loi = max(35.0, 41.13 - (r - 1) * 0.4)
+            pred_makeup = 68.52 if fresh_makeup_mode.startswith("고정량") else 92.42
+
+            sim_rows.append({
+                "회차 (Run)": r,
+                "구분": "AI 예측치 (Simulated)",
+                "Li 회수율 (%)": round(pred_rec, 2),
+                "1차여액 Li농도 (mg/L)": round(pred_li_conc, 1),
+                "1차여액 LiOH농도 (g/L)": round(pred_lioh_conc, 2),
+                "M/B 닫힘율 (%)": round(max(90.0, 95.06 - (r - 1) * 0.2), 2),
+                "하소 감율 LOI (%)": round(pred_loi, 2),
+                "CaO 활성도 (%)": round(eff_activity, 1),
+                "신품 CaO 보충량 (g)": round(pred_makeup, 2)
+            })
+
+    df_simulation = pd.DataFrame(sim_rows)
+
+    st.markdown("---")
+    st.subheader("📊 회차별 인터랙티브 X-Y 트렌드 그래프")
+
+    col_ctrl1, col_ctrl2 = st.columns([1, 2])
+    with col_ctrl1:
+        y_axis_metric = st.selectbox(
+            "📌 Y축에 표시할 지표를 선택하세요:",
+            [
+                "Li 회수율 (%)", "1차여액 LiOH농도 (g/L)", "1차여액 Li농도 (mg/L)", 
+                "CaO 활성도 (%)", "하소 감율 LOI (%)", "신품 CaO 보충량 (g)"
+            ]
+        )
+
+    chart_df = df_simulation.set_index("회차 (Run)")[[y_axis_metric]]
+    st.line_chart(chart_df, height=380, use_container_width=True)
+
+    st.markdown("##### 📋 회차별 실측치 & 예측 시뮬레이션 상세 데이터 테이블")
+    st.dataframe(
+        df_simulation.style.format({
+            "Li 회수율 (%)": "{:.2f} %",
+            "1차여액 Li농도 (mg/L)": "{:,.1f} mg/L",
+            "1차여액 LiOH농도 (g/L)": "{:.2f} g/L",
+            "M/B 닫힘율 (%)": "{:.2f} %",
+            "하소 감율 LOI (%)": "{:.2f} %",
+            "CaO 활성도 (%)": "{:.1f} %",
+            "신품 CaO 보충량 (g)": "{:.2f} g"
+        }),
+        use_container_width=True
+    )
+
+# --------------------------------------------------------------------------
+# TAB 4: 💬 AI 공정 대화창
+# --------------------------------------------------------------------------
+with main_tab4:
+    st.header("💬 AI 공정 엔지니어와 대화하기")
+    st.caption("현재 실험 수치, ICP 분석 결과, $n$회차 시뮬레이션을 바탕으로 실시간 질의응답을 진행합니다.")
+
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if user_prompt := st.chat_input("질문을 입력하세요 (예: Ca 농도가 120ppm이면 제품 순도에 영향이 커?)"):
+        st.session_state.chat_messages.append({"role": "user", "content": user_prompt})
+        with st.chat_message("user"):
+            st.markdown(user_prompt)
+
+        prompt_low = user_prompt.lower()
+        if "ca" in prompt_low or "칼슘" in prompt_low or "불순물" in prompt_low:
+            ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. 배터리급 수산화리튬(LH) 스펙 대비 높으므로, 증발 농축/결정화 전에 CO₂ 가스를 불어넣어 침전 분리하는 **2차 탄산화(Carbonation) 탈칼슘 공정**을 거치는 것을 권장합니다."
+        elif "ph" in prompt_low or "수세" in prompt_low or "세척" in prompt_low:
+            ai_reply = f"수세액 pH가 **{wash_sol_ph}**로 높은 이유는 1차 감압 여과 후 케이크 기공 내 LiOH 고농도 액이 갇혀 있었기 때문입니다. 3배수 수세를 통해 총 {mass_w_g[0]:.2f}g의 Li(회수율 기여도 {li_rec_w_pct:.2f}%)을 회수하였습니다."
+        elif "소결" in prompt_low or "sintering" in prompt_low or "퍼지" in prompt_low:
+            ai_reply = f"1000℃ 고온 하소가 반복되면 활성도가 회차당 약 {sintering_decay}%씩 저하됩니다. 회수율을 90% 이상 유지하려면 약 6~7회차 시점에 재생 CaO 일부를 퍼지(Purge)하고 신품 CaO로 리프레시해 주시는 것이 좋습니다."
+        else:
+            ai_reply = f"Run {run_no}의 총 Li 회수율은 **{total_li_rec_pct:.2f}%** (1차 여액 {li_rec_1_pct:.1f}% + 수세액 {li_rec_w_pct:.1f}%)로 산출되었습니다. 추가로 확인하고 싶은 반응 변수나 거동 조건이 있으신가요?"
+
+        st.session_state.chat_messages.append({"role": "assistant", "content": ai_reply})
+        with st.chat_message("assistant"):
+            st.markdown(ai_reply)
+
+# --------------------------------------------------------------------------
+# TAB 5: 📧 리포트 메일 발송 현황 & 연결 테스트
+# --------------------------------------------------------------------------
+with main_tab5:
+    st.header("📧 리포트 메일 발송 현황 & 계정 설정")
+    st.caption("실험 데이터 저장 시 자동으로 발송된 이메일 현황 목록을 모니터링하고 발송 설정을 관리합니다.")
+
+    st.markdown("### 📋 실시간 메일 발송 이력 현황")
+    if st.session_state.email_logs:
+        df_logs = pd.DataFrame(st.session_state.email_logs)
+        success_cnt = sum(1 for log in st.session_state.email_logs if "성공" in log["발송 상태"])
+        fail_cnt = len(st.session_state.email_logs) - success_cnt
+
+        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1.metric("총 발송 시도", f"{len(st.session_state.email_logs)} 건")
+        m_col2.metric("발송 성공", f"{success_cnt} 건")
+        m_col3.metric("발송 실패 / 보류", f"{fail_cnt} 건", delta_color="inverse")
+
+        st.dataframe(df_logs, use_container_width=True)
+
+        if st.button("🗑️ 발송 이력 초기화", use_container_width=False):
+            st.session_state.email_logs = []
+            st.rerun()
+    else:
+        st.info("ℹ️ 아직 발송된 메일 이력이 없습니다. 2번 탭에서 [💾 트렌드 DB에 저장]을 누르면 엑셀 리포트가 자동 발송되고 여기에 기록됩니다.")
+
+    st.divider()
+
+    st.markdown("### ⚙️ 발송 계정 및 수신자 설정")
+    col_cfg1, col_cfg2 = st.columns(2)
+
+    with col_cfg1:
+        st.session_state.email_recipients = st.text_input(
+            "📬 수신자 이메일 목록 (쉼표로 구분)", 
+            value=st.session_state.email_recipients,
+            help="예: user1@company.com, user2@company.com"
+        )
+        st.session_state.email_sender = st.text_input(
+            "📤 발신자 이메일 주소 (예: myname@gmail.com)", 
+            value=st.session_state.email_sender
+        )
+        st.session_state.email_password = st.text_input(
+            "🔑 발신자 앱 비밀번호 (16자리)", 
+            value=st.session_state.email_password,
+            type="password",
+            help="Gmail: Google 계정 보안 > 2단계 인증 > 앱 비밀번호"
+        )
+
+    with col_cfg2:
+        st.session_state.smtp_server = st.text_input(
+            "🌐 SMTP 서버 호스트", 
+            value=st.session_state.smtp_server
+        )
+        st.session_state.smtp_port = st.number_input(
+            "🔌 SMTP 포트 번호", 
+            value=int(st.session_state.smtp_port),
+            step=1
+        )
+        st.write("")
+        st.session_state.auto_email_on_save = st.toggle(
+            "⚡ 실험값 저장 시 엑셀 리포트 자동 발송 활성화", 
+            value=st.session_state.auto_email_on_save
+        )
+
+    st.markdown("---")
+    st.markdown("#### 🔍 계정 연결 1초 진단 테스트")
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        if st.button("🔌 SMTP 계정 연결 즉시 테스트", use_container_width=True):
+            test_sender = st.session_state.email_sender.strip()
+            test_pw = st.session_state.email_password.strip().replace(" ", "")
+            test_host = st.session_state.smtp_server.strip()
+            test_port = int(st.session_state.smtp_port)
+
+            if not test_sender or not test_pw:
+                st.error("❌ 발신자 이메일과 비밀번호를 입력한 후 테스트를 눌러주세요.")
+            else:
+                with st.spinner("메일 서버 연결 및 로그인 인증 테스트 중..."):
+                    try:
+                        if test_port == 465:
+                            s = smtplib.SMTP_SSL(test_host, test_port, timeout=10)
+                        else:
+                            s = smtplib.SMTP(test_host, test_port, timeout=10)
+                            s.starttls()
+                        s.login(test_sender, test_pw)
+                        s.quit()
+                        st.success(f"🎉 **[인증 성공!]** `{test_sender}` 계정으로 메일 서버에 정상 로그인되었습니다!")
+                    except Exception as err:
+                        st.error(f"❌ **[인증 실패]** 상세 원인: {err}")
+
+    with col_t2:
+        if st.button("📨 현재 회차 리포트 수동 발송", type="primary", use_container_width=True):
+            ok, msg_res = send_email_report(
+                run_num=run_no, mass_cls=mass_closure, loss_m=loss_mass,
+                li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
+                lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
+                si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
+                purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+                df_icp_tbl=df_icp_summary, df_sim_tbl=df_simulation, is_auto=False
+            )
+            if ok:
+                st.success(f"🎉 {msg_res}")
+                st.rerun()
+            else:
+                st.error(f"❌ {msg_res}")
+                st.rerun()
