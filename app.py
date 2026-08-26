@@ -32,7 +32,7 @@ AGENT_TITLE = "LC-LH전환반응 M/B자동화 및 거동예측 Agent tool"
 st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
 
 # --------------------------------------------------------------------------
-# [1] 기본 세션 상태 및 변수 초기화
+# [1] 기본 세션 상태 및 Secrets 키 자동 연동
 # --------------------------------------------------------------------------
 DEFAULT_DATA = {
     "run_no": 1,
@@ -74,8 +74,17 @@ for k, v in DEFAULT_DATA.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-if "gemini_api_key" not in st.session_state:
-    st.session_state.gemini_api_key = ""
+# Secrets에 저장된 GEMINI_API_KEY 자동 로드
+secret_key = ""
+try:
+    if "GEMINI_API_KEY" in st.secrets:
+        secret_key = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    pass
+
+if "gemini_api_key" not in st.session_state or not st.session_state.gemini_api_key:
+    st.session_state.gemini_api_key = secret_key
+
 if "email_recipients" not in st.session_state:
     st.session_state.email_recipients = "user@company.com"
 if "email_sender" not in st.session_state:
@@ -108,16 +117,16 @@ if "history" not in st.session_state:
 
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
-        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. Google Gemini Vision 기반 사진 인식, M/B 연산, 거동예측에 대해 무엇이든 질문해 주세요."}
+        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. Google Gemini Vision 기반 사진 인식, 자율 DoE 실험 설계, M/B 연산에 대해 무엇이든 질문해 주세요."}
     ]
 
 # --------------------------------------------------------------------------
-# [2] Google Gemini Vision OCR 분석 함수 (무료 티어 적용)
+# [2] Google Gemini Vision OCR 분석 함수
 # --------------------------------------------------------------------------
 def parse_image_with_vision(image_bytes, doc_type="lab_note"):
     api_key = st.session_state.gemini_api_key.strip()
     if not api_key:
-        return None, "사이드바에 Google Gemini API Key를 먼저 입력해 주세요. (무료 발급 가능)"
+        return None, "사이드바에 Google Gemini API Key를 입력하거나 Secrets에 등록해 주세요."
 
     try:
         genai.configure(api_key=api_key)
@@ -150,7 +159,7 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
   "test_dry_cake": number,
   "calcined_cao": number
 }"""
-        else: # icp_report
+        else:
             prompt = """이 이미지는 용액 ICP 분석 기기 화면 또는 시험 성적서 인쇄물입니다.
 1차 여액(Primary Filtrate)과 수세액(Wash Solution)의 Li, Ca, Na, Si, Mg, K 농도(mg/L)를 추출하여 아래 JSON 포맷으로만 반환해 주세요.
 단위는 제외하고 순수 숫자만 넣어주세요. 판독할 수 없는 항목은 null로 설정하세요.
@@ -172,7 +181,7 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
         return None, str(e)
 
 # --------------------------------------------------------------------------
-# [3] 이메일 리포트 발송 공통 함수
+# [3] 이메일 발송 공통 함수
 # --------------------------------------------------------------------------
 def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w, 
                       lioh_conc, li_1, ca_1, na_1, si_1, mg_1, k_1, 
@@ -189,7 +198,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
     port_num = int(st.session_state.smtp_port)
 
     if not sender or not pw:
-        return False, "발신자 계정 또는 비밀번호가 비어 있습니다. (5번 탭 확인)"
+        return False, "발신자 계정 또는 비밀번호가 비어 있습니다. (6번 탭 확인)"
 
     try:
         wb = Workbook()
@@ -275,11 +284,11 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
         return False, f"메일 발송 실패: {err_msg}"
 
 # --------------------------------------------------------------------------
-# [4] 사이드바: Google Gemini API Key 설정 (무료)
+# [4] 사이드바: Google Gemini API Key 설정
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("🔑 Google Gemini AI 설정")
-    st.caption("Google AI Studio의 무료 API Key를 입력하세요. (신용카드 불필요)")
+    st.caption("무료 Gemini API Key로 사진 인식 및 자율 DoE 레시피를 생성합니다.")
     st.session_state.gemini_api_key = st.text_input(
         "Google Gemini API Key", 
         value=st.session_state.gemini_api_key, 
@@ -289,21 +298,22 @@ with st.sidebar:
     if st.session_state.gemini_api_key:
         st.success("✅ Gemini AI 준비 완료 (무료 티어)")
     else:
-        st.info("💡 aistudio.google.com 에서 무료로 발급받은 키를 넣으시면 사진 인식이 활성화됩니다.")
+        st.info("💡 aistudio.google.com 에서 무료로 발급받은 키를 넣으시면 DoE 및 사진 인식이 활성화됩니다.")
     st.divider()
 
 # --------------------------------------------------------------------------
-# [5] 메인 화면 및 탭 구성
+# [5] 메인 화면 및 6개 탭 구성
 # --------------------------------------------------------------------------
 st.title(f"🧪 {AGENT_TITLE}")
-st.caption("Google Gemini 사진 인식 | M/B 자동 연산 | ICP 성분별 회수율 | 회차별 거동예측 | 리포트 자동 발송")
+st.caption("AI DoE 자율 실험계획 | Gemini 사진 인식 | M/B 자동 연산 | ICP 성분별 회수율 | 거동예측 | 리포트 자동 발송")
 
-main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
+main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
     "1️⃣ 실험 데이터 입력 & M/B 연산", 
     "2️⃣ 🧪 용액 ICP 분석 & 회수율", 
     "3️⃣ 📈 회차별 트렌드 & 거동예측", 
-    "4️⃣ 💬 AI 공정 대화창", 
-    "5️⃣ 📧 리포트 메일 발송 및 현황"
+    "4️⃣ 🔬 AI 자율 실험계획 (DoE)",
+    "5️⃣ 💬 AI 공정 대화창", 
+    "6️⃣ 📧 리포트 메일 발송 및 현황"
 ])
 
 # --------------------------------------------------------------------------
@@ -711,9 +721,135 @@ with main_tab3:
     )
 
 # --------------------------------------------------------------------------
-# TAB 4: 💬 AI 공정 대화창
+# TAB 4: 🔬 AI 자율 실험계획 & 레시피 추천 (DoE Agent)
 # --------------------------------------------------------------------------
 with main_tab4:
+    st.header("🔬 Google Gemini 기반 자율 실험계획 (DoE Agent)")
+    st.caption("과거 실험 데이터와 Ca-Loop 화학 양론을 기반으로 차기 회차의 최적 반응/소성 레시피를 AI가 자율 설계합니다.")
+
+    doe_col1, doe_col2 = st.columns(2)
+    with doe_col1:
+        next_run_num = len(st.session_state.history) + 1
+        st.markdown(f"#### 🎯 차기 실험 회차: **Run {next_run_num}**")
+        target_goal = st.selectbox(
+            "📌 실험 최적화 목표 설정",
+            [
+                "1. Li 회수율 극대화 (최대 회수율 98%+ 목표)",
+                "2. 불순물(Ca, Na 등) 최소화 (배터리급 초고순도 목표)",
+                "3. 신품 CaO 절감 및 원가 최적화 (Ca-Loop 최대 재활용)",
+                "4. 공정 시간 및 에너지(온도) 절감 최적화"
+            ]
+        )
+    with doe_col2:
+        st.markdown("#### ⚙️ 공정 제약 조건")
+        cao_avail = st.number_input("현재 보유 재생 CaO (g)", value=float(st.session_state["calcined_cao"]), format="%.1f")
+        target_li2co3 = st.number_input("목표 Li₂CO₃ 투입량 (g)", value=95.34, format="%.2f")
+
+    if st.button("🚀 Gemini 자율 DoE 최적 레시피 생성", type="primary", use_container_width=True):
+        api_key = st.session_state.gemini_api_key.strip()
+        if not api_key:
+            st.error("❌ 사이드바에 Google Gemini API Key를 입력하거나 Secrets에 등록해 주세요.")
+        else:
+            with st.spinner(f"Gemini AI가 과거 {len(st.session_state.history)}개 회차 데이터와 공정 반응 속도론을 분석 중입니다..."):
+                try:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel("gemini-1.5-flash")
+
+                    history_summary = st.session_state.history.to_dict(orient="records")
+
+                    doe_prompt = f"""
+당신은 탄산리튬(LC) → 수산화리튬(LH) 전환 가성화 및 CaCO3-CaO 순환 하소(Ca-Loop) 공정의 수석 화학공정 엔지니어입니다.
+
+[현재 상태 데이터]
+- 다음 실험 회차: Run {next_run_num}
+- 최적화 목표: {target_goal}
+- 목표 Li2CO3 투입량: {target_li2co3} g
+- 사용 가능 재생 CaO: {cao_avail} g
+- 과거 실험 이력: {json.dumps(history_summary, ensure_ascii=False)}
+
+위 데이터를 바탕으로 차기 회차를 위한 최적의 실험 조건(DoE Recipe)을 산출하여 반드시 아래 JSON 포맷으로만 응답해 주세요.
+숫자는 순수 숫자(float)로만 제공해야 합니다.
+
+{{
+  "recipe": {{
+    "run_no": {next_run_num},
+    "li2co3_mass": float,
+    "li2co3_water": float,
+    "fresh_cao_mass": float,
+    "recycled_cao_mass": float,
+    "slurry_water": float,
+    "temp_c": float,
+    "time_h": float,
+    "wash_ratio": float,
+    "calc_temp": float,
+    "calc_time": float
+  }},
+  "expected_outcome": {{
+    "expected_recovery_pct": float,
+    "expected_lioh_conc_gl": float,
+    "expected_ca_mg_l": float
+  }},
+  "engineering_rationale": "배합비와 반응 조건을 이렇게 설정한 엔지니어링 근거 (3~4줄)",
+  "precautions": "실험 진행 시 핵심 주의사항 (2~3줄)"
+}}
+"""
+                    resp = model.generate_content(
+                        doe_prompt,
+                        generation_config={"response_mime_type": "application/json"}
+                    )
+                    doe_result = json.loads(resp.text)
+                    st.session_state.latest_doe = doe_result
+                    st.success("🎉 Gemini AI 자율 DoE 레시피가 성공적으로 생성되었습니다!")
+                except Exception as e:
+                    st.error(f"❌ DoE 생성 실패: {e}")
+
+    # 생성된 DoE 결과 표시
+    if "latest_doe" in st.session_state and st.session_state.latest_doe:
+        doe = st.session_state.latest_doe
+        rec = doe.get("recipe", {})
+        exp = doe.get("expected_outcome", {})
+
+        st.markdown("---")
+        st.subheader("📋 Gemini AI 추천 차기 실험 레시피 (DoE Recipe)")
+
+        d1, d2, d3 = st.columns(3)
+        d1.metric("🎯 예상 Li 회수율", f"{exp.get('expected_recovery_pct', 0):.2f} %")
+        d2.metric("💧 예상 여액 LiOH 농도", f"{exp.get('expected_lioh_conc_gl', 0):.2f} g/L")
+        d3.metric("⚠️ 예상 불순물 Ca 농도", f"{exp.get('expected_ca_mg_l', 0):.1f} mg/L")
+
+        df_recipe_view = pd.DataFrame([
+            {"공정 항목": "Li₂CO₃ 투입량", "추천 수치": f"{rec.get('li2co3_mass', 95.34):.2f} g", "비고": "원료"},
+            {"공정 항목": "Li₂CO₃ 용매수", "추천 수치": f"{rec.get('li2co3_water', 1040.0):.1f} g", "비고": "용해수"},
+            {"공정 항목": "신품 CaO 투입량", "추천 수치": f"{rec.get('fresh_cao_mass', 68.52):.2f} g", "비고": "신품 보충"},
+            {"공정 항목": "재생 CaO 투입량", "추천 수치": f"{rec.get('recycled_cao_mass', 23.90):.2f} g", "비고": "재생분 활용"},
+            {"공정 항목": "슬러리 조제수", "추천 수치": f"{rec.get('slurry_water', 831.0):.1f} g", "비고": "소화수"},
+            {"공정 항목": "반응 온도", "추천 수치": f"{rec.get('temp_c', 80.0):.1f} ℃", "비고": "가성화"},
+            {"공정 항목": "반응 시간", "추천 수치": f"{rec.get('time_h', 2.0):.1f} 시간", "비고": "교반"},
+            {"공정 항목": "하소(소성) 온도", "추천 수치": f"{rec.get('calc_temp', 1000.0):.1f} ℃", "비고": "CaCO₃ 탈탄산"},
+            {"공정 항목": "하소(소성) 시간", "추천 수치": f"{rec.get('calc_time', 1.0):.1f} 시간", "비고": "소결 억제"}
+        ])
+        st.table(df_recipe_view)
+
+        st.info(f"💡 **[엔지니어링 설계 근거]**\n{doe.get('engineering_rationale', '-')}")
+        st.warning(f"⚠️ **[실험 주의사항]**\n{doe.get('precautions', '-')}")
+
+        if st.button("📥 이 추천 레시피를 1번 탭 입력창에 즉시 반영하기", type="primary"):
+            st.session_state["run_no"] = rec.get("run_no", next_run_num)
+            st.session_state["li2co3_mass"] = rec.get("li2co3_mass", 95.34)
+            st.session_state["li2co3_water"] = rec.get("li2co3_water", 1040.0)
+            st.session_state["fresh_cao_mass"] = rec.get("fresh_cao_mass", 68.52)
+            st.session_state["recycled_cao_mass"] = rec.get("recycled_cao_mass", 23.90)
+            st.session_state["slurry_water"] = rec.get("slurry_water", 831.0)
+            st.session_state["temp_c"] = rec.get("temp_c", 80.0)
+            st.session_state["time_h"] = rec.get("time_h", 2.0)
+            st.session_state["calc_temp"] = rec.get("calc_temp", 1000.0)
+            st.session_state["calc_time"] = rec.get("calc_time", 1.0)
+            st.success("✅ 추천 레시피가 1번 탭 입력창에 모두 적용되었습니다! 1번 탭으로 이동하여 실험을 진행하세요.")
+
+# --------------------------------------------------------------------------
+# TAB 5: 💬 AI 공정 대화창
+# --------------------------------------------------------------------------
+with main_tab5:
     st.header("💬 AI 공정 엔지니어와 대화하기")
     st.caption("현재 실험 수치, ICP 분석 결과, $n$회차 시뮬레이션을 바탕으로 실시간 질의응답을 진행합니다.")
 
@@ -726,24 +862,34 @@ with main_tab4:
         with st.chat_message("user"):
             st.markdown(user_prompt)
 
-        prompt_low = user_prompt.lower()
-        if "ca" in prompt_low or "칼슘" in prompt_low or "불순물" in prompt_low:
-            ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. 배터리급 수산화리튬(LH) 스펙 대비 높으므로, 증발 농축/결정화 전에 CO₂ 가스를 불어넣어 침전 분리하는 **2차 탄산화(Carbonation) 탈칼슘 공정**을 거치는 것을 권장합니다."
-        elif "ph" in prompt_low or "수세" in prompt_low or "세척" in prompt_low:
-            ai_reply = f"수세액 pH가 **{wash_sol_ph}**로 높은 이유는 1차 감압 여과 후 케이크 기공 내 LiOH 고농도 액이 갇혀 있었기 때문입니다. 3배수 수세를 통해 총 {mass_w_g[0]:.2f}g의 Li(회수율 기여도 {li_rec_w_pct:.2f}%)을 회수하였습니다."
-        elif "소결" in prompt_low or "sintering" in prompt_low or "퍼지" in prompt_low:
-            ai_reply = f"1000℃ 고온 하소가 반복되면 활성도가 회차당 약 {sintering_decay}%씩 저하됩니다. 회수율을 90% 이상 유지하려면 약 6~7회차 시점에 재생 CaO 일부를 퍼지(Purge)하고 신품 CaO로 리프레시해 주시는 것이 좋습니다."
+        api_key = st.session_state.gemini_api_key.strip()
+        if api_key:
+            try:
+                genai.configure(api_key=api_key)
+                chat_model = genai.GenerativeModel("gemini-1.5-flash")
+                context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
+현재 공정 데이터:
+- Li 회수율: {total_li_rec_pct:.2f}% (1차 여액 {li_rec_1_pct:.1f}%, 수세액 {li_rec_w_pct:.1f}%)
+- 1차 여액 LiOH 농도: {lioh_equiv_g_l:.2f} g/L, Ca: {icp_ca_1} mg/L, Na: {icp_na_1} mg/L
+- LOI: {loi_pct:.2f}%, M/B 정합성: {mass_closure:.2f}%
+
+질문: {user_prompt}
+배터리 소재 품질 및 양론적 관점에서 친절하고 명확하게 답변해 주세요."""
+                resp = chat_model.generate_content(context_prompt)
+                ai_reply = resp.text
+            except Exception as e:
+                ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. (API 호출 실패: {e})"
         else:
-            ai_reply = f"Run {run_no}의 총 Li 회수율은 **{total_li_rec_pct:.2f}%** (1차 여액 {li_rec_1_pct:.1f}% + 수세액 {li_rec_w_pct:.1f}%)로 산출되었습니다. 추가로 확인하고 싶은 반응 변수나 거동 조건이 있으신가요?"
+            ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. 배터리급 수산화리튬(LH) 스펙 대비 높으므로, 증발 농축/결정화 전에 CO₂ 가스를 불어넣어 침전 분리하는 **2차 탄산화(Carbonation) 탈칼슘 공정**을 거치는 것을 권장합니다."
 
         st.session_state.chat_messages.append({"role": "assistant", "content": ai_reply})
         with st.chat_message("assistant"):
             st.markdown(ai_reply)
 
 # --------------------------------------------------------------------------
-# TAB 5: 📧 리포트 메일 발송 현황 & 연결 테스트
+# TAB 6: 📧 리포트 메일 발송 현황 & 연결 테스트
 # --------------------------------------------------------------------------
-with main_tab5:
+with main_tab6:
     st.header("📧 리포트 메일 발송 현황 & 계정 설정")
     st.caption("실험 데이터 저장 시 자동으로 발송된 이메일 현황 목록을 모니터링하고 발송 설정을 관리합니다.")
 
