@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import io
 import smtplib
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -27,7 +28,9 @@ AGENT_TITLE = "LC-LH전환반응 M/B자동화 및 거동예측 Agent tool"
 
 st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
 
-# 세션 상태 초기화 (기본 수치 및 실측 데이터 이력)
+# --------------------------------------------------------------------------
+# [1] 기본 세션 상태 및 변수 초기화
+# --------------------------------------------------------------------------
 DEFAULT_DATA = {
     "run_no": 1,
     "li2co3_mass": 95.34,
@@ -68,6 +71,25 @@ for k, v in DEFAULT_DATA.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# 메일 설정 세션 초기화
+if "email_recipients" not in st.session_state:
+    st.session_state.email_recipients = "user@company.com"
+if "email_sender" not in st.session_state:
+    st.session_state.email_sender = "sender@gmail.com"
+if "email_password" not in st.session_state:
+    st.session_state.email_password = ""
+if "smtp_server" not in st.session_state:
+    st.session_state.smtp_server = "smtp.gmail.com"
+if "smtp_port" not in st.session_state:
+    st.session_state.smtp_port = 587
+if "auto_email_on_save" not in st.session_state:
+    st.session_state.auto_email_on_save = True
+
+# 메일 발송 이력 로그 초기화
+if "email_logs" not in st.session_state:
+    st.session_state.email_logs = []
+
+# 실측 트렌드 히스토리 초기화
 if "history" not in st.session_state:
     st.session_state.history = pd.DataFrame([
         {
@@ -88,16 +110,146 @@ if "chat_messages" not in st.session_state:
         {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 탄산리튬(LC)에서 수산화리튬(LH)으로의 가성화 M/B 연산, ICP 불순물 분석, 회차별 거동예측에 대해 무엇이든 질문해 주세요."}
     ]
 
-st.title(f"🧪 {AGENT_TITLE}")
-st.caption("탄산리튬(LC) → 수산화리튬(LH) 가성화 양론 연산 | ICP 성분별 회수율 및 불순물 분석 | 회차별 거동예측 | 리포트 메일 발송")
+# --------------------------------------------------------------------------
+# [2] 이메일 리포트 발송 공통 함수
+# --------------------------------------------------------------------------
+def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w, 
+                      lioh_conc, li_1, ca_1, na_1, si_1, mg_1, k_1, 
+                      loi, purity, makeup, cao_rec, df_icp_tbl, df_sim_tbl, is_auto=True):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    recipients = [r.strip() for r in st.session_state.email_recipients.split(",") if r.strip()]
+    
+    if not recipients:
+        st.session_state.email_logs.append({
+            "발송일시": now_str,
+            "회차 (Run)": f"Run {run_num}",
+            "수신자": "(미지정)",
+            "메일 제목": f"[{AGENT_TITLE}] Run {run_num} 리포트",
+            "발송 상태": "❌ 실패",
+            "첨부 파일": "-",
+            "비고": "수신자 이메일 주소가 비어 있습니다."
+        })
+        return False, "수신자 이메일 주소가 설정되지 않았습니다."
 
-# 상단 메인 탭
+    sender = st.session_state.email_sender
+    pw = st.session_state.email_password
+
+    if not sender or not pw:
+        st.session_state.email_logs.append({
+            "발송일시": now_str,
+            "회차 (Run)": f"Run {run_num}",
+            "수신자": ", ".join(recipients),
+            "메일 제목": f"[{AGENT_TITLE}] Run {run_num} 리포트",
+            "발송 상태": "❌ 실패",
+            "첨부 파일": "-",
+            "비고": "발신자 계정 또는 앱 비밀번호가 설정되지 않았습니다. (5번 탭 설정 확인)"
+        })
+        return False, "발신자 이메일 계정/비밀번호가 비어 있어 자동 발송에 실패했습니다. (5번 탭 확인)"
+
+    try:
+        # 엑셀 파일 생성
+        wb = Workbook()
+        ws1 = wb.active
+        ws1.title = "MB_종합결과"
+        ws1.append(["지표명", "수치", "단위", "평가"])
+        ws1.append(["실험 회차", run_num, "Run", "정상"])
+        ws1.append(["총 Li 회수율(ICP)", round(li_rec_tot, 2), "%", "1차여액+수세액"])
+        ws1.append(["1차 여액 LiOH 농도", round(lioh_conc, 2), "g/L", f"Li: {li_1:.1f} mg/L"])
+        ws1.append(["M/B 정합성", round(mass_cls, 2), "%", f"증발 {loss_m:.1f}g"])
+        ws1.append(["소성 감율(LOI)", round(loi, 2), "%", f"CaCO3 순도 ~{purity:.1f}%"])
+        ws1.append(["차기 신품 CaO 보충량", round(makeup, 2), "g", f"재생분 {cao_rec:.1f}g"])
+
+        if df_icp_tbl is not None and not df_icp_tbl.empty:
+            ws2 = wb.create_sheet(title="ICP_원소분석")
+            ws2.append(list(df_icp_tbl.columns))
+            for _, r in df_icp_tbl.iterrows():
+                ws2.append(list(r.values))
+
+        if df_sim_tbl is not None and not df_sim_tbl.empty:
+            ws3 = wb.create_sheet(title="트렌드시뮬레이션")
+            ws3.append(list(df_sim_tbl.columns))
+            for _, r in df_sim_tbl.iterrows():
+                ws3.append(list(r.values))
+
+        excel_buf = io.BytesIO()
+        wb.save(excel_buf)
+        excel_buf.seek(0)
+        file_name = f"MB_Report_Run_{run_num:03d}.xlsx"
+
+        # 메일 본문 작성
+        mail_subject = f"[{AGENT_TITLE}] Run {run_num} M/B 및 ICP 분석 종합 리포트"
+        msg = MIMEMultipart()
+        msg["From"] = sender
+        msg["To"] = ", ".join(recipients)
+        msg["Subject"] = mail_subject
+
+        html_body = f"""
+        <h3>🧪 {AGENT_TITLE} - Run {run_num} 자동 리포트</h3>
+        <p>본 메일은 실험 데이터 저장 시 에이전트에 의해 자동 발송되었습니다.</p>
+        <hr>
+        <h4>📊 핵심 KPI 요약</h4>
+        <ul>
+            <li><b>총 Li 회수율:</b> <span style="color:#0284C7; font-weight:bold;">{li_rec_tot:.2f}%</span> (1차 여액: {li_rec_1:.2f}%, 수세액: {li_rec_w:.2f}%)</li>
+            <li><b>1차 여액 LiOH 농도:</b> {lioh_conc:.2f} g/L (Li: {li_1:,.1f} mg/L)</li>
+            <li><b>M/B 정합성(Closure):</b> {mass_cls:.2f}% (증발 손실: {loss_m:.1f}g)</li>
+            <li><b>소성 감율(LOI):</b> {loi:.2f}% (CaCO₃ 추정 순도: {purity:.1f}%)</li>
+            <li><b>차기(Run {run_num+1}) 신품 CaO 보충량:</b> {makeup:.2f}g (재생분 {cao_rec:.1f}g 활용)</li>
+        </ul>
+        <h4>🧪 주요 불순물 농도 (1차 여액)</h4>
+        <ul>
+            <li>Ca: {ca_1} mg/L | Na: {na_1} mg/L | Si: {si_1} mg/L | Mg: {mg_1} mg/L | K: {k_1} mg/L</li>
+        </ul>
+        <p>※ 세부 분석표와 $n$회차 거동예측 데이터가 포함된 엑셀 파일(<b>{file_name}</b>)을 첨부하였습니다.</p>
+        """
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+        # 첨부파일
+        part = MIMEApplication(excel_buf.read(), Name=file_name)
+        part['Content-Disposition'] = f'attachment; filename="{file_name}"'
+        msg.attach(part)
+
+        # SMTP 발송
+        server = smtplib.SMTP(st.session_state.smtp_server, int(st.session_state.smtp_port))
+        server.starttls()
+        server.login(sender, pw)
+        server.send_message(msg)
+        server.quit()
+
+        st.session_state.email_logs.append({
+            "발송일시": now_str,
+            "회차 (Run)": f"Run {run_num}",
+            "수신자": ", ".join(recipients),
+            "메일 제목": mail_subject,
+            "발송 상태": "✅ 성공 (발송완료)",
+            "첨부 파일": file_name,
+            "비고": "자동 발송 (트렌드 DB 저장 트리거)" if is_auto else "수동 즉시 발송"
+        })
+        return True, f"[{', '.join(recipients)}]로 리포트 메일이 자동 발송되었습니다!"
+    except Exception as e:
+        err_msg = str(e)
+        st.session_state.email_logs.append({
+            "발송일시": now_str,
+            "회차 (Run)": f"Run {run_num}",
+            "수신자": ", ".join(recipients),
+            "메일 제목": f"[{AGENT_TITLE}] Run {run_num} 리포트",
+            "발송 상태": "❌ 실패",
+            "첨부 파일": "-",
+            "비고": f"SMTP 오류: {err_msg[:40]}..."
+        })
+        return False, f"메일 발송 실패: {err_msg}"
+
+# --------------------------------------------------------------------------
+# [3] 메인 화면 및 탭 구성
+# --------------------------------------------------------------------------
+st.title(f"🧪 {AGENT_TITLE}")
+st.caption("탄산리튬(LC) → 수산화리튬(LH) 가성화 양론 연산 | ICP 성분별 회수율 및 불순물 분석 | 회차별 거동예측 | 리포트 자동 발송")
+
 main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
     "1️⃣ 실험 데이터 입력 & M/B 연산", 
     "2️⃣ 🧪 용액 ICP 분석 & 회수율", 
     "3️⃣ 📈 회차별 트렌드 & 거동예측", 
     "4️⃣ 💬 AI 공정 대화창", 
-    "5️⃣ 📧 리포트 메일 발송"
+    "5️⃣ 📧 리포트 메일 발송 및 현황"
 ])
 
 # --------------------------------------------------------------------------
@@ -131,7 +283,7 @@ with main_tab1:
 
         st.divider()
 
-        # 소성 분리 배치 (여과/수세 아래)
+        # 소성 분리 배치
         st.markdown("#### [3. CaCO₃ 소성(하소) 및 CaO 재생]")
         col_calc1, col_calc2 = st.columns(2)
         with col_calc1:
@@ -173,13 +325,12 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 용액 ICP 분석 (엑셀 업로드 & 형태 A 파싱 & 하단 회수율 연산)
+# TAB 2: 🧪 용액 ICP 분석 (엑셀 업로드 & 하단 회수율 연산 & 자동 메일 트리거)
 # --------------------------------------------------------------------------
 with main_tab2:
     st.header("🧪 용액 ICP 분석 데이터 입력 및 회수율 계산")
     st.markdown("분석실에서 전달받은 **ICP 엑셀 파일(형태 A)**을 업로드하거나 직접 수치를 입력하세요.")
 
-    # [1] 엑셀 파일 업로드 섹션 & 템플릿 다운로드
     with st.container():
         col_up1, col_up2 = st.columns([3, 1])
         with col_up1:
@@ -188,9 +339,8 @@ with main_tab2:
                 type=["xlsx", "xls", "csv"]
             )
         with col_up2:
-            st.write("") # 줄맞춤
             st.write("")
-            # 표준 템플릿 생성용 버퍼
+            st.write("")
             df_template = pd.DataFrame({
                 "시료명 (Sample)": ["1차 여액 (Primary Filtrate)", "수세액 (Wash Solution)"],
                 "Li (mg/L)": [10500.0, 1400.0],
@@ -221,7 +371,6 @@ with main_tab2:
                 else:
                     df_up = pd.read_excel(uploaded_icp_file)
 
-                # 시료명 컬럼 탐색
                 sample_col = None
                 for col in df_up.columns:
                     if any(k in str(col).lower() for k in ["시료", "sample", "구분", "item", "name", "용액"]):
@@ -230,7 +379,6 @@ with main_tab2:
                 if sample_col is None:
                     sample_col = df_up.columns[0]
 
-                # 1차 여액 / 수세액 행 탐색
                 row_1 = None
                 row_w = None
                 for idx, val in df_up[sample_col].astype(str).items():
@@ -243,7 +391,6 @@ with main_tab2:
                 if row_1 is None and len(df_up) >= 1: row_1 = 0
                 if row_w is None and len(df_up) >= 2: row_w = 1
 
-                # 원소 컬럼 탐색 및 매칭
                 elem_mapping = {
                     "Li": ("icp_li_1", "icp_li_w"),
                     "Ca": ("icp_ca_1", "icp_ca_w"),
@@ -257,7 +404,6 @@ with main_tab2:
                 for col in df_up.columns:
                     c_clean = str(col).strip().upper()
                     for el, (k1, kw) in elem_mapping.items():
-                        # "Li (mg/L)", "Li", "LI_mg/L", "Lithium" 등 매칭
                         tokens = [t.strip("()[],._") for t in c_clean.split()]
                         first_tok = tokens[0] if tokens else ""
                         if first_tok == el.upper() or c_clean.startswith(el.upper()):
@@ -269,14 +415,13 @@ with main_tab2:
                             break
 
                 matched_elems = list(set(matched_elems))
-                st.success(f"🎉 엑셀 분석 완료! 매칭된 성분: **{', '.join(matched_elems)}** (수치가 자동 반영되었습니다)")
+                st.success(f"🎉 엑셀 분석 완료! 매칭된 성분: **{', '.join(matched_elems)}**")
             except Exception as e:
                 st.error(f"❌ 엑셀 파싱 오류: {e}")
 
     st.divider()
 
-    # [2] ICP 농도 입력 폼 (엑셀 업로드 시 값이 자동 채워짐)
-    st.markdown("### 1. ICP 분석 데이터 확인 및 수동 수정 (단위: mg/L)")
+    st.markdown("### 1. ICP 분석 데이터 확인 및 수정 (단위: mg/L)")
     icp_col1, icp_col2 = st.columns(2)
 
     with icp_col1:
@@ -299,7 +444,6 @@ with main_tab2:
 
     st.divider()
 
-    # [3] 하단 회수율 연산 및 성분 질량 요약표
     st.markdown("### 2. 성분별 질량 및 회수율 계산 결과")
 
     v1_L = (primary_filtrate_mass / primary_filtrate_sg) / 1000.0
@@ -351,24 +495,15 @@ with main_tab2:
         use_container_width=True
     )
 
-    # AI ICP 진단 코멘트
-    st.markdown("##### 🤖 ICP 분석 기반 AI 공정 진단")
-    icp_diags = []
-    if icp_ca_1 > 200.0:
-        icp_diags.append(f"여액 내 Ca 농도가 {icp_ca_1:.1f} mg/L로 높습니다. CaO 과잉 또는 미세 고형분 유출 가능성이 있으므로 탄산화(Carbonation) 탈칼슘 후처리가 필요합니다.")
-    if li_rec_w_pct > 10.0:
-        icp_diags.append(f"수세액에서 전체 리튬의 {li_rec_w_pct:.1f}%가 회수되었습니다. 케이크 여과 탈수 효율을 높여 1차 여액 회수율을 극대화할 필요가 있습니다.")
-    if icp_na_1 > 50.0 or icp_k_1 > 20.0:
-        icp_diags.append(f"알칼리 불순물(Na: {icp_na_1} mg/L, K: {icp_k_1} mg/L)은 수용성이 높아 여액에 100% 잔류하므로, 농축/결정화 단계 전 원료 순도 관리가 요구됩니다.")
+    # 저장 및 자동 메일 발송 버튼
+    st.markdown("---")
+    col_sv1, col_sv2 = st.columns([2, 1])
+    with col_sv1:
+        save_clicked = st.button("💾 이 분석 결과를 트렌드 DB에 저장 (및 엑셀 리포트 자동 메일 발송)", type="primary", use_container_width=True)
+    with col_sv2:
+        st.session_state.auto_email_on_save = st.checkbox("저장 시 메일 자동 발송 켜기", value=st.session_state.auto_email_on_save)
 
-    if not icp_diags:
-        icp_diags.append("모든 불순물(Ca, Na, Si, Mg, K) 수치와 Li 회수율이 정상 관리 범위 내에 있습니다.")
-
-    for d in icp_diags:
-        st.info(f"💡 {d}")
-
-    # 트렌드 DB에 분석 결과 반영
-    if st.button("💾 이 분석 결과를 트렌드 DB에 최종 저장하기", type="primary"):
+    if save_clicked:
         new_row = {
             "회차 (Run)": int(run_no),
             "구분": "실측치 (Actual)",
@@ -382,7 +517,23 @@ with main_tab2:
         }
         st.session_state.history = st.session_state.history[st.session_state.history["회차 (Run)"] != run_no]
         st.session_state.history = pd.concat([st.session_state.history, pd.DataFrame([new_row])]).sort_values("회차 (Run)").reset_index(drop=True)
-        st.success(f"✅ Run {run_no} ICP 분석 및 회수율 데이터가 트렌드 DB에 영구 등록되었습니다!")
+        st.success(f"✅ Run {run_no} ICP 분석 데이터가 트렌드 DB에 영구 등록되었습니다!")
+
+        # 이메일 자동 발송 트리거
+        if st.session_state.auto_email_on_save:
+            ok, msg_res = send_email_report(
+                run_num=run_no, mass_cls=mass_closure, loss_m=loss_mass,
+                li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
+                lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
+                si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
+                purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+                df_icp_tbl=df_icp_summary, df_sim_tbl=None, is_auto=True
+            )
+            if ok:
+                st.toast(f"📧 리포트 메일 자동 발송 완료!", icon="🎉")
+                st.success(f"📧 **[자동 발송 성공]** {msg_res}")
+            else:
+                st.warning(f"⚠️ **[자동 발송 미완료]** {msg_res}")
 
 # --------------------------------------------------------------------------
 # TAB 3: 📈 회차별 트렌드 & 거동예측
@@ -504,80 +655,88 @@ with main_tab4:
             st.markdown(ai_reply)
 
 # --------------------------------------------------------------------------
-# TAB 5: 📧 리포트 메일 발송
+# TAB 5: 📧 리포트 메일 발송 현황 및 발송 설정
 # --------------------------------------------------------------------------
 with main_tab5:
-    st.header(f"📧 {AGENT_TITLE} 결과 메일 발송")
-    st.markdown("ICP 분석표 및 M/B 결과가 포함된 엑셀 파일(`.xlsx`)을 메일로 전송합니다.")
+    st.header("📧 리포트 메일 발송 현황 & 계정 설정")
+    st.caption("실험 데이터 저장 시 자동으로 발송된 이메일 현황 목록을 모니터링하고 발송 설정을 관리합니다.")
 
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        recipient_email = st.text_input("수신자 이메일 주소", value="user@company.com")
-        email_subject = st.text_input("메일 제목", value=f"[{AGENT_TITLE}] Run {run_no} 종합 브리핑")
-        sender_email = st.text_input("발신자 이메일 주소 (Gmail/SMTP)", value="sender@gmail.com")
-        sender_password = st.text_input("발신자 앱 비밀번호 (16자리)", type="password")
+    # 1. 상단: 발송 이력 현황 테이블
+    st.markdown("### 📋 실시간 메일 발송 이력 현황")
+    
+    if st.session_state.email_logs:
+        df_logs = pd.DataFrame(st.session_state.email_logs)
+        
+        # 성공/실패 카운트
+        success_cnt = sum(1 for log in st.session_state.email_logs if "성공" in log["발송 상태"])
+        fail_cnt = len(st.session_state.email_logs) - success_cnt
 
-    with col_m2:
-        smtp_server = st.text_input("SMTP 서버", value="smtp.gmail.com")
-        smtp_port = st.number_input("SMTP 포트", value=587, step=1)
+        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1.metric("총 발송 시도", f"{len(st.session_state.email_logs)} 건")
+        m_col2.metric("발송 성공", f"{success_cnt} 건")
+        m_col3.metric("발송 실패 / 보류", f"{fail_cnt} 건", delta_color="inverse")
 
-    if st.button("🚀 엑셀 리포트 첨부하여 이메일 발송", type="primary", use_container_width=True):
-        if not sender_email or not sender_password or not recipient_email:
-            st.error("❌ 발신자/수신자 이메일과 비밀번호를 모두 입력해 주세요.")
+        st.dataframe(df_logs, use_container_width=True)
+
+        if st.button("🗑️ 발송 이력 초기화", use_container_width=False):
+            st.session_state.email_logs = []
+            st.rerun()
+    else:
+        st.info("ℹ️ 아직 발송된 메일 이력이 없습니다. 2번 탭에서 [💾 트렌드 DB에 저장]을 누르면 엑셀 리포트가 자동 발송되고 여기에 기록됩니다.")
+
+    st.divider()
+
+    # 2. 하단: 메일 계정 설정 및 수동 재발송
+    st.markdown("### ⚙️ 발송 계정 및 수신자 설정")
+    col_cfg1, col_cfg2 = st.columns(2)
+
+    with col_cfg1:
+        st.session_state.email_recipients = st.text_input(
+            "📬 수신자 이메일 목록 (쉼표로 구분하여 여러 명 지정 가능)", 
+            value=st.session_state.email_recipients,
+            help="예: user1@company.com, user2@company.com"
+        )
+        st.session_state.email_sender = st.text_input(
+            "📤 발신자 이메일 주소 (Gmail / 사내 SMTP)", 
+            value=st.session_state.email_sender
+        )
+        st.session_state.email_password = st.text_input(
+            "🔑 발신자 앱 비밀번호 (16자리 App Password)", 
+            value=st.session_state.email_password,
+            type="password",
+            help="Gmail 사용 시 Google 계정 보안 > 2단계 인증 > 앱 비밀번호 생성값 입력"
+        )
+
+    with col_cfg2:
+        st.session_state.smtp_server = st.text_input(
+            "🌐 SMTP 서버 호스트", 
+            value=st.session_state.smtp_server
+        )
+        st.session_state.smtp_port = st.number_input(
+            "🔌 SMTP 포트 번호", 
+            value=int(st.session_state.smtp_port),
+            step=1
+        )
+        st.write("")
+        st.session_state.auto_email_on_save = st.toggle(
+            "⚡ 실험값 저장 시 엑셀 리포트 자동 발송 활성화", 
+            value=st.session_state.auto_email_on_save
+        )
+
+    st.markdown("---")
+    st.markdown("#### 🚀 현재 회차 (Run %d) 수동 즉시 발송" % run_no)
+    if st.button("📨 지금 바로 이메일 발송하기", type="primary", use_container_width=True):
+        ok, msg_res = send_email_report(
+            run_num=run_no, mass_cls=mass_closure, loss_m=loss_mass,
+            li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
+            lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
+            si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
+            purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+            df_icp_tbl=df_icp_summary, df_sim_tbl=df_simulation, is_auto=False
+        )
+        if ok:
+            st.success(f"🎉 {msg_res}")
+            st.rerun()
         else:
-            try:
-                wb = Workbook()
-                ws1 = wb.active
-                ws1.title = "MB_종합결과"
-                ws1.append(["지표명", "수치", "단위", "평가"])
-                ws1.append(["실험 회차", run_no, "Run", "정상"])
-                ws1.append(["총 Li 회수율(ICP)", round(total_li_rec_pct, 2), "%", "1차여액+수세액"])
-                ws1.append(["1차 여액 LiOH 농도", round(lioh_equiv_g_l, 2), "g/L", f"Li: {icp_li_1:.1f} mg/L"])
-                ws1.append(["M/B 정합성", round(mass_closure, 2), "%", f"증발 {loss_mass:.1f}g"])
-                ws1.append(["소성 감율(LOI)", round(loi_pct, 2), "%", f"CaCO3 순도 ~{purity_caco3:.1f}%"])
-
-                ws2 = wb.create_sheet(title="ICP_원소분석")
-                ws2.append(list(df_icp_summary.columns))
-                for _, r in df_icp_summary.iterrows():
-                    ws2.append(list(r.values))
-
-                ws3 = wb.create_sheet(title="트렌드시뮬레이션")
-                ws3.append(list(df_simulation.columns))
-                for _, r in df_simulation.iterrows():
-                    ws3.append(list(r.values))
-
-                excel_buffer = io.BytesIO()
-                wb.save(excel_buffer)
-                excel_buffer.seek(0)
-
-                msg = MIMEMultipart()
-                msg["From"] = sender_email
-                msg["To"] = recipient_email
-                msg["Subject"] = email_subject
-
-                html_body = f"""
-                <h3>🧪 {AGENT_TITLE} - Run {run_no} 리포트</h3>
-                <hr>
-                <ul>
-                    <li><b>총 Li 회수율:</b> {total_li_rec_pct:.2f}% (1차 여액: {li_rec_1_pct:.2f}%, 수세액: {li_rec_w_pct:.2f}%)</li>
-                    <li><b>1차 여액 LiOH 농도:</b> {lioh_equiv_g_l:.2f} g/L (Li: {icp_li_1:,.1f} mg/L)</li>
-                    <li><b>주요 불순물 농도(1차 여액):</b> Ca {icp_ca_1} mg/L, Na {icp_na_1} mg/L, Si {icp_si_1} mg/L, Mg {icp_mg_1} mg/L, K {icp_k_1} mg/L</li>
-                    <li><b>M/B 정합성(Closure):</b> {mass_closure:.2f}% (증발 손실: {loss_mass:.1f}g)</li>
-                </ul>
-                <p>※ 세부 ICP 분석표 및 시뮬레이션 데이터가 포함된 엑셀 파일(5개 시트)을 첨부하였습니다.</p>
-                """
-                msg.attach(MIMEText(html_body, "html", "utf-8"))
-
-                part = MIMEApplication(excel_buffer.read(), Name=f"MB_ICP_Report_Run_{run_no:03d}.xlsx")
-                part['Content-Disposition'] = f'attachment; filename="MB_ICP_Report_Run_{run_no:03d}.xlsx"'
-                msg.attach(part)
-
-                server = smtplib.SMTP(smtp_server, smtp_port)
-                server.starttls()
-                server.login(sender_email, sender_password)
-                server.send_message(msg)
-                server.quit()
-
-                st.success(f"🎉 [{recipient_email}]로 엑셀 리포트 및 ICP 분석 결과 메일이 발송되었습니다!")
-            except Exception as e:
-                st.error(f"❌ 메일 발송 실패: {e}")
+            st.error(f"❌ {msg_res}")
+            st.rerun()
