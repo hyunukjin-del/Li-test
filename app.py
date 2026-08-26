@@ -27,6 +27,9 @@ MW_SI = 28.09
 MW_MG = 24.31
 MW_K = 39.10
 
+# 원소 표준 정렬 순서 정의
+ELEMENT_ORDER = ["Li", "Ca", "Na", "Si", "Mg", "K"]
+
 AGENT_TITLE = "LC-LH전환반응 M/B자동화 및 거동예측 Agent tool"
 
 st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
@@ -57,7 +60,7 @@ DEFAULT_DATA = {
     "calcined_cao": 23.9,
     "calc_temp": 1000.0,
     "calc_time": 1.0,
-    # 액체 ICP 분석 (mg/L)
+    # 액체 ICP 분석 (mg/L) - 순서: Li, Ca, Na, Si, Mg, K
     "icp_li_1": 10500.0,
     "icp_ca_1": 120.0,
     "icp_na_1": 45.0,
@@ -70,7 +73,7 @@ DEFAULT_DATA = {
     "icp_si_w": 2.1,
     "icp_mg_w": 0.3,
     "icp_k_w": 2.0,
-    # 고체 CaCO3 분석 (wt%)
+    # 고체 CaCO3 분석 (wt%) - 순서: Li, Ca, Na, Si, Mg, K
     "solid_li_wt": 0.38,
     "solid_ca_wt": 38.20,
     "solid_na_wt": 0.015,
@@ -482,7 +485,7 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 LiOH 용액 & CaCO₃ 통합 분석 (막대그래프 시각화 탑재)
+# TAB 2: 🧪 LiOH 용액 & CaCO₃ 통합 분석 (순서: Li -> Ca -> Na -> Si -> Mg -> K 고정)
 # --------------------------------------------------------------------------
 with main_tab2:
     col_hdr1, col_hdr2 = st.columns([3, 1])
@@ -616,7 +619,7 @@ with main_tab2:
 
     st.divider()
 
-    # 3개 컬럼으로 액체 2종(mg/L) + 고체 1종(wt%) 입력
+    # 3개 컬럼으로 액체 2종(mg/L) + 고체 1종(wt%) 입력 (Li -> Ca -> Na -> Si -> Mg -> K 순서)
     st.markdown("### 1. LiOH 용액(mg/L), 수세액(mg/L) 및 CaCO₃(wt%) 분석 데이터 확인/수정")
     icp_col1, icp_col2, icp_col3 = st.columns(3)
 
@@ -649,14 +652,14 @@ with main_tab2:
 
     st.divider()
 
-    # [2] 하단 질량 및 전체 원소 수지 연산
+    # [2] 하단 질량 및 전체 원소 수지 연산 (순서: Li -> Ca -> Na -> Si -> Mg -> K)
     st.markdown("### 2. LiOH 용액 & CaCO₃ 통합 원소 물질수지(Elemental M/B) 결과")
 
     v1_L = v_primary_calc_ml / 1000.0
     vw_L = v_wash_calc_ml / 1000.0
     dry_cake_g = est_total_dry_solids
 
-    elements = ["Li", "Ca", "Na", "Si", "Mg", "K"]
+    elements = ELEMENT_ORDER  # ["Li", "Ca", "Na", "Si", "Mg", "K"] 고정
     conc_1 = [icp_li_1, icp_ca_1, icp_na_1, icp_si_1, icp_mg_1, icp_k_1]
     conc_w = [icp_li_w, icp_ca_w, icp_na_w, icp_si_w, icp_mg_w, icp_k_w]
     wt_solid = [solid_li_wt, solid_ca_wt, solid_na_wt, solid_si_wt, solid_mg_wt, solid_k_wt]
@@ -722,7 +725,7 @@ with main_tab2:
     )
 
     # ----------------------------------------------------------------------
-    # [3] 📊 원소별 회수율/분배율 막대그래프 시각화 (신규 추가)
+    # [3] 📊 원소별 회수율/분배율 막대그래프 시각화 (Li -> Ca -> Na -> Si -> Mg -> K 고정)
     # ----------------------------------------------------------------------
     st.markdown("---")
     st.subheader(f"📊 Run {current_active_run} 원소별 회수율 및 스트림 분배 막대그래프")
@@ -739,30 +742,32 @@ with main_tab2:
             horizontal=False
         )
 
-    # 차트용 데이터프레임 구성
+    # 차트용 데이터프레임 구성 (순서: Li -> Ca -> Na -> Si -> Mg -> K 범주형 인덱스로 고정)
+    cat_index = pd.CategoricalIndex(elements, categories=elements, ordered=True)
+
     if graph_view_mode.startswith("1."):
         df_bar = pd.DataFrame({
             "LiOH 용액 (여과액)": [round(p, 2) for p in dist_1_pct],
             "수세액": [round(p, 2) for p in dist_w_pct],
             "CaCO₃ 고체 잔류": [round(p, 2) for p in dist_s_pct]
-        }, index=elements)
-        st.caption("ℹ️ **스트림별 전체 분배율 (%):** 각 원소가 LiOH 용액(여액), 수세액, CaCO₃ 고체로 분배된 비율입니다. (Li는 총 투입량 기준 회수율 %)")
-        st.bar_chart(df_bar, height=360, use_container_width=True)
+        }, index=cat_index)
+        st.caption("ℹ️ **스트림별 전체 분배율 (%):** 각 원소(Li, Ca, Na, Si, Mg, K)가 LiOH 용액(여액), 수세액, CaCO₃ 고체로 분배된 비율입니다. (Li는 총 투입량 기준 회수율 %)")
+        st.bar_chart(df_bar, height=380, use_container_width=True)
 
     elif graph_view_mode.startswith("2."):
         df_bar = pd.DataFrame({
             "LiOH 용액 (여과액)": [round(p, 2) for p in dist_1_pct],
             "수세액": [round(p, 2) for p in dist_w_pct]
-        }, index=elements)
-        st.caption("ℹ️ **용액 스트림 분배율 (%):** LiOH 용액과 수세액으로 각각 회수/용출된 비율 비교입니다.")
-        st.bar_chart(df_bar, height=360, use_container_width=True)
+        }, index=cat_index)
+        st.caption("ℹ️ **용액 스트림 분배율 (%):** LiOH 용액과 수세액으로 각각 회수/용출된 비율 비교입니다. (순서: Li → Ca → Na → Si → Mg → K)")
+        st.bar_chart(df_bar, height=380, use_container_width=True)
 
     else: # 3. 통합 보기
         df_bar = pd.DataFrame({
             "용액 총 회수/용출률 (LiOH용액 + 수세액)": [round(p, 2) for p in dist_tot_sol_pct]
-        }, index=elements)
-        st.caption("ℹ️ **용액 총 회수율 (%):** 1차 LiOH 용액과 수세액을 합산한 액체 스트림 총 회수율/용출률입니다.")
-        st.bar_chart(df_bar, height=360, use_container_width=True)
+        }, index=cat_index)
+        st.caption("ℹ️ **용액 총 회수율 (%):** 1차 LiOH 용액과 수세액을 합산한 액체 스트림 총 회수율/용출률입니다. (순서: Li → Ca → Na → Si → Mg → K)")
+        st.bar_chart(df_bar, height=380, use_container_width=True)
 
     st.markdown("---")
     col_sv1, col_sv2 = st.columns([2, 1])
@@ -1025,7 +1030,7 @@ with main_tab5:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if user_prompt := st.chat_input("질문을 입력하세요 (예: 수세수를 850g 넣었을 때 세척 효율이 적정한가?)"):
+    if user_prompt := st.chat_input("질문을 입력하세요 (예: CaCO₃ 내 Li 잔류량이 0.38wt%면 회수율에 얼마나 영향 줘?)"):
         st.session_state.chat_messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
             st.markdown(user_prompt)
@@ -1050,9 +1055,9 @@ with main_tab5:
                 resp = chat_model.generate_content(context_prompt)
                 ai_reply = resp.text
             except Exception as e:
-                ai_reply = f"현재 수세수 투입량은 **{wash_water_in:.1f} g**, 수세액 회수율 기여도는 **{li_rec_w_pct:.2f}%**입니다. (API 호출 실패: {e})"
+                ai_reply = f"현재 LiOH 용액 내 Ca 농도는 **{icp_ca_1} mg/L**, CaCO₃ Li 잔류 손실은 **{li_cake_loss_pct:.2f}%**입니다. (API 호출 실패: {e})"
         else:
-            ai_reply = f"현재 수세수 투입량은 **{wash_water_in:.1f} g**, 수세액 회수율 기여도는 **{li_rec_w_pct:.2f}%**입니다."
+            ai_reply = f"현재 LiOH 용액 내 Ca 농도는 **{icp_ca_1} mg/L**, CaCO₃ Li 잔류 손실은 **{li_cake_loss_pct:.2f}%**입니다."
 
         st.session_state.chat_messages.append({"role": "assistant", "content": ai_reply})
         with st.chat_message("assistant"):
