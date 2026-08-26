@@ -120,7 +120,7 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] Gemini 스마트 모델 자동 감지 함수 (404 방지)
+# [2] Gemini 최신 모델 자동 감지 함수 (gemini-3.6-flash 대응)
 # --------------------------------------------------------------------------
 def get_best_gemini_model(api_key):
     genai.configure(api_key=api_key)
@@ -131,10 +131,11 @@ def get_best_gemini_model(api_key):
             if "generateContent" in m.supported_generation_methods
         ]
         priority_list = [
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-flash",
+            "gemini-3.6-flash",
+            "gemini-3.6-flash-latest",
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
-            "gemini-2.0-flash-exp",
+            "gemini-1.5-flash",
             "gemini-1.5-pro",
             "gemini-pro"
         ]
@@ -145,7 +146,7 @@ def get_best_gemini_model(api_key):
             return genai.GenerativeModel(available_models[0])
     except Exception:
         pass
-    return genai.GenerativeModel("gemini-1.5-flash-latest")
+    return genai.GenerativeModel("gemini-3.6-flash")
 
 def parse_image_with_vision(image_bytes, doc_type="lab_note"):
     api_key = st.session_state.gemini_api_key.strip()
@@ -311,7 +312,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("🔑 Google Gemini AI 설정")
-    st.caption("무료 Gemini API Key로 사진 인식 및 자율 DoE 레시피를 생성합니다.")
+    st.caption("Google AI Studio의 무료 API Key를 입력하세요.")
     st.session_state.gemini_api_key = st.text_input(
         "Google Gemini API Key", 
         value=st.session_state.gemini_api_key, 
@@ -319,7 +320,7 @@ with st.sidebar:
         help="aistudio.google.com에서 발급받은 AIzaSy... 키를 입력하세요."
     )
     if st.session_state.gemini_api_key:
-        st.success("✅ Gemini AI 준비 완료 (무료 티어)")
+        st.success("✅ Gemini AI 준비 완료 (최신 모델 연동)")
     else:
         st.info("💡 aistudio.google.com 에서 무료로 발급받은 키를 넣으시면 DoE 및 사진 인식이 활성화됩니다.")
     st.divider()
