@@ -216,7 +216,8 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
 # --------------------------------------------------------------------------
 def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w, li_cake_loss,
                       lioh_conc, li_1, ca_1, na_1, si_1, mg_1, k_1, 
-                      loi, purity, makeup, cao_rec, df_icp_tbl, df_sim_tbl, is_auto=True):
+                      loi, purity, makeup, cao_rec, cake_moisture, dry_caco3_mass,
+                      df_icp_tbl, df_sim_tbl, is_auto=True):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     recipients = [r.strip() for r in st.session_state.email_recipients.split(",") if r.strip()]
     
@@ -242,6 +243,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
         ws1.append(["총 Li 원소 정합성", round(li_rec_tot + li_cake_loss, 2), "%", "액체+고체 닫힘율"])
         ws1.append(["LiOH 용액 농도", round(lioh_conc, 2), "g/L", f"Li: {li_1:.1f} mg/L"])
         ws1.append(["전체 공정 M/B 닫힘율", round(mass_cls, 2), "%", f"증발 {loss_m:.1f}g"])
+        ws1.append(["CaCO3 함수율", round(cake_moisture, 2), "%", f"건조 CaCO3: {dry_caco3_mass:.1f}g"])
         ws1.append(["소성 감율(LOI)", round(loi, 2), "%", f"CaCO3 순도 ~{purity:.1f}%"])
 
         if df_icp_tbl is not None and not df_icp_tbl.empty:
@@ -276,6 +278,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
             <li><b>CaCO₃ Li 잔류/손실률:</b> <span style="color:#E11D48; font-weight:bold;">{li_cake_loss:.2f}%</span></li>
             <li><b>총 Li 원소 정합성(Closure):</b> <b>{li_rec_tot + li_cake_loss:.2f}%</b></li>
             <li><b>LiOH 용액 농도:</b> {lioh_conc:.2f} g/L (Li: {li_1:,.1f} mg/L)</li>
+            <li><b>CaCO₃ 함수율 & 건조중량:</b> {cake_moisture:.2f}% (건조 CaCO₃: {dry_caco3_mass:.1f}g)</li>
             <li><b>공정 무게 M/B 닫힘율:</b> {mass_cls:.2f}% (증발 손실: {loss_m:.1f}g)</li>
         </ul>
         <p>※ LiOH 용액(mg/L) 및 CaCO₃(wt%) 통합 분석 데이터 엑셀 파일(<b>{file_name}</b>)을 첨부하였습니다.</p>
@@ -343,7 +346,7 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
 ])
 
 # --------------------------------------------------------------------------
-# TAB 1: 실험 데이터 입력 및 기초 M/B 연산 (비중 환산 mL 표시 탑재)
+# TAB 1: 실험 데이터 입력 및 기초 M/B 연산 (함수율 및 건조 CaCO3 무게 연동)
 # --------------------------------------------------------------------------
 with main_tab1:
     with st.expander("📷 [AI Vision] 수기 실험 노트/기록지 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
@@ -399,7 +402,7 @@ with main_tab1:
             time_h = st.number_input("반응 시간 (시간)", value=float(st.session_state["time_h"]), format="%.1f", key="inp_time_h")
 
         with col_in2:
-            st.markdown("#### [2. LiOH 용액 여과 및 케이크 수세]")
+            st.markdown("#### [2. LiOH 용액 여과 및 CaCO₃ 분리]")
             primary_filtrate_mass = st.number_input("LiOH 용액 무게 (g)", value=float(st.session_state["primary_filtrate_mass"]), format="%.1f", key="inp_primary_filtrate_mass")
             primary_filtrate_sg = st.number_input("LiOH 용액 비중 (g/mL)", value=float(st.session_state["primary_filtrate_sg"]), format="%.3f", step=0.001, key="inp_primary_filtrate_sg")
             
@@ -408,13 +411,20 @@ with main_tab1:
             st.info(f"🧪 **LiOH 용액 환산 부피:** `{v_primary_calc_ml:.1f} mL` (비중 {primary_filtrate_sg:.3f} g/mL 기준)")
 
             primary_filtrate_ph = st.number_input("LiOH 용액 pH", value=float(st.session_state["primary_filtrate_ph"]), format="%.2f", step=0.05, key="inp_primary_filtrate_ph")
-            wet_cake_mass = st.number_input("1차 습케이크 무게 (g)", value=float(st.session_state["wet_cake_mass"]), format="%.1f", key="inp_wet_cake_mass")
+            
+            # 1차 습케이크 -> CaCO3 무게(습중량)로 수정
+            wet_cake_mass = st.number_input("CaCO₃ 무게 (습중량, g)", value=float(st.session_state["wet_cake_mass"]), format="%.1f", key="inp_wet_cake_mass")
             sample_wet = st.number_input("함수율 측정 샘플 습중량 (g)", value=float(st.session_state["sample_wet"]), format="%.1f", key="inp_sample_wet")
             sample_dry = st.number_input("함수율 측정 샘플 건중량 (g)", value=float(st.session_state["sample_dry"]), format="%.1f", key="inp_sample_dry")
+            
+            # 함수율 및 건조 CaCO3 무게 실시간 계산 및 표시
+            calc_moisture_val = (1.0 - (sample_dry / sample_wet)) * 100.0 if sample_wet > 0 else 0.0
+            calc_dry_caco3_val = wet_cake_mass * (sample_dry / sample_wet) if sample_wet > 0 else 0.0
+            st.success(f"🧱 **CaCO₃ 함수율:** `{calc_moisture_val:.2f} %` | **함수율 기준 건조 CaCO₃ 무게:** `{calc_dry_caco3_val:.1f} g`")
+
             wash_sol_mass = st.number_input("회수된 수세액 무게 (g)", value=float(st.session_state["wash_sol_mass"]), format="%.1f", key="inp_wash_sol_mass")
             wash_sol_sg = st.number_input("수세액 비중 (g/mL)", value=float(st.session_state["wash_sol_sg"]), format="%.3f", step=0.001, key="inp_wash_sol_sg")
             
-            # 수세액 환산 mL 실시간 표시
             v_wash_calc_ml = wash_sol_mass / wash_sol_sg if wash_sol_sg > 0 else 0.0
             st.info(f"🧪 **수세액 환산 부피:** `{v_wash_calc_ml:.1f} mL` (비중 {wash_sol_sg:.3f} g/mL 기준)")
 
@@ -442,8 +452,8 @@ with main_tab1:
     total_out = primary_filtrate_mass + wet_cake_mass
     loss_mass = total_in - total_out
     mass_closure = (total_out / total_in) * 100.0
-    cake_moisture = (1.0 - (sample_dry / sample_wet)) * 100.0 if sample_wet > 0 else 0.0
-    est_total_dry_solids = wet_cake_mass * (sample_dry / sample_wet) if sample_wet > 0 else 0.0
+    cake_moisture = calc_moisture_val
+    est_total_dry_solids = calc_dry_caco3_val
 
     loi_pct = ((test_dry_cake - calcined_cao) / test_dry_cake) * 100.0 if test_dry_cake > 0 else 0.0
     cao_yield_dry = (calcined_cao / test_dry_cake) * 100.0 if test_dry_cake > 0 else 0.0
@@ -457,7 +467,7 @@ with main_tab1:
     st.subheader(f"📊 Run {st.session_state['run_no']} 공정 기본 물질수지(M/B)")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("M/B 정합성 (Closure)", f"{mass_closure:.2f} %", f"증발: {loss_mass:.1f}g")
-    k2.metric("CaCO₃ 함수율", f"{cake_moisture:.2f} %", f"CaCO₃ 고형분 {est_total_dry_solids:.1f}g")
+    k2.metric("CaCO₃ 함수율 & 건조중량", f"{cake_moisture:.2f} %", f"건조 CaCO₃: {est_total_dry_solids:.1f}g")
     k3.metric("소성 감율 (LOI)", f"{loi_pct:.2f} %", f"CaCO₃ 순도 ~{purity_caco3:.1f}%")
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
@@ -725,6 +735,7 @@ with main_tab2:
                 li_cake_loss=li_cake_loss_pct, lioh_conc=lioh_equiv_g_l, li_1=icp_li_1,
                 ca_1=icp_ca_1, na_1=icp_na_1, si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1,
                 loi=loi_pct, purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+                cake_moisture=cake_moisture, dry_caco3_mass=est_total_dry_solids,
                 df_icp_tbl=df_integrated_summary, df_sim_tbl=None, is_auto=True
             )
             if ok:
@@ -968,6 +979,7 @@ with main_tab5:
 - CaCO₃ Li 손실률: {li_cake_loss_pct:.2f}% (고체 wt%: {solid_li_wt:.3f}%)
 - 총 Li 원소 닫힘율: {total_li_closure_pct:.2f}%
 - LiOH 용액 농도: {lioh_equiv_g_l:.2f} g/L, Ca: {icp_ca_1} mg/L, Na: {icp_na_1} mg/L
+- CaCO₃ 함수율: {cake_moisture:.2f}% (건조 CaCO₃: {est_total_dry_solids:.1f}g)
 - LOI: {loi_pct:.2f}%, M/B 정합성: {mass_closure:.2f}%
 
 질문: {user_prompt}
@@ -1081,6 +1093,7 @@ with main_tab6:
                 li_cake_loss=li_cake_loss_pct, lioh_conc=lioh_equiv_g_l, li_1=icp_li_1,
                 ca_1=icp_ca_1, na_1=icp_na_1, si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1,
                 loi=loi_pct, purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+                cake_moisture=cake_moisture, dry_caco3_mass=est_total_dry_solids,
                 df_icp_tbl=df_integrated_summary, df_sim_tbl=df_simulation, is_auto=False
             )
             if ok:
