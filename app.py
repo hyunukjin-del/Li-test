@@ -74,6 +74,21 @@ for k, v in DEFAULT_DATA.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# 회차 양방향 동기화 키 초기화
+if "tab1_run_no" not in st.session_state:
+    st.session_state.tab1_run_no = int(st.session_state["run_no"])
+if "tab2_run_no" not in st.session_state:
+    st.session_state.tab2_run_no = int(st.session_state["run_no"])
+
+def sync_run_from_tab1():
+    st.session_state["run_no"] = st.session_state.tab1_run_no
+    st.session_state.tab2_run_no = st.session_state.tab1_run_no
+
+def sync_run_from_tab2():
+    st.session_state["run_no"] = st.session_state.tab2_run_no
+    st.session_state.tab1_run_no = st.session_state.tab2_run_no
+
+# Secrets에 저장된 GEMINI_API_KEY 자동 로드
 secret_key = ""
 try:
     if "GEMINI_API_KEY" in st.secrets:
@@ -120,7 +135,7 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] Gemini 최신 모델 자동 감지 함수 (gemini-3.6-flash 대응)
+# [2] Gemini 최신 모델 자동 감지 함수
 # --------------------------------------------------------------------------
 def get_best_gemini_model(api_key):
     genai.configure(api_key=api_key)
@@ -368,6 +383,11 @@ with main_tab1:
                                 if v is not None and k in st.session_state:
                                     st.session_state[k] = float(v)
                                     applied_cnt += 1
+                            if "run_no" in parsed_data and parsed_data["run_no"] is not None:
+                                r_val = int(parsed_data["run_no"])
+                                st.session_state["run_no"] = r_val
+                                st.session_state.tab1_run_no = r_val
+                                st.session_state.tab2_run_no = r_val
                             st.success(f"🎉 판독 완료! 총 {applied_cnt}개 수치가 입력창에 자동 반영되었습니다.")
                             st.rerun()
 
@@ -375,7 +395,15 @@ with main_tab1:
         col_in1, col_in2 = st.columns(2)
         with col_in1:
             st.markdown("#### [1. 투입 원료 및 반응 조건]")
-            run_no = st.number_input("실험 회차 (Run No.)", min_value=1, value=int(st.session_state["run_no"]), step=1, key="run_no")
+            # 1번 탭 회차 입력창 (2번 탭과 양방향 연동)
+            run_no = st.number_input(
+                "실험 회차 (Run No.)", 
+                min_value=1, 
+                value=int(st.session_state["run_no"]), 
+                step=1, 
+                key="tab1_run_no", 
+                on_change=sync_run_from_tab1
+            )
             li2co3_mass = st.number_input("Li₂CO₃ 투입량 (g)", value=float(st.session_state["li2co3_mass"]), format="%.2f", key="inp_li2co3_mass")
             li2co3_water = st.number_input("Li₂CO₃ 용매수 (g)", value=float(st.session_state["li2co3_water"]), format="%.1f", key="inp_li2co3_water")
             fresh_cao_mass = st.number_input("신품 CaO 투입량 (g)", value=float(st.session_state["fresh_cao_mass"]), format="%.2f", key="inp_fresh_cao_mass")
@@ -430,7 +458,7 @@ with main_tab1:
     target_cao = 92.42
     fresh_makeup = max(0.0, target_cao - calcined_cao)
 
-    st.subheader(f"📊 Run {run_no} 공정 기본 물질수지(M/B)")
+    st.subheader(f"📊 Run {st.session_state['run_no']} 공정 기본 물질수지(M/B)")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("M/B 정합성 (Closure)", f"{mass_closure:.2f} %", f"증발: {loss_mass:.1f}g")
     k2.metric("1차 케익 함수율", f"{cake_moisture:.2f} %", f"고형분 {est_total_dry_solids:.1f}g")
@@ -438,11 +466,24 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 용액 ICP 분석
+# TAB 2: 🧪 용액 ICP 분석 (실험회차 연동 탑재)
 # --------------------------------------------------------------------------
 with main_tab2:
-    st.header("🧪 용액 ICP 분석 데이터 입력 및 회수율 계산")
-    st.markdown("분석실 **성적서 사진(Gemini Vision)** 또는 **엑셀 파일**을 업로드하면 성분값이 자동 채워집니다.")
+    # 2번 탭 상단: 회차 컨트롤 바 (1번 탭과 실시간 연동)
+    col_hdr1, col_hdr2 = st.columns([3, 1])
+    with col_hdr1:
+        st.header(f"🧪 용액 ICP 분석 & 회수율 계산 (Run {st.session_state['run_no']})")
+        st.caption("분석실 **성적서 사진(Gemini Vision)** 또는 **엑셀 파일**을 업로드하면 성분값이 자동 채워집니다.")
+    with col_hdr2:
+        st.number_input(
+            "📌 분석 대상 회차 (Run No.)", 
+            min_value=1, 
+            value=int(st.session_state["run_no"]), 
+            step=1, 
+            key="tab2_run_no", 
+            on_change=sync_run_from_tab2,
+            help="이곳에서 회차를 변경하면 1번 탭 및 모든 결과 저장이 해당 회차로 즉시 연동됩니다."
+        )
 
     with st.expander("📷 [AI Vision] ICP 성적서 / 기기 화면 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
         col_icp_img1, col_icp_img2 = st.columns([2, 1])
@@ -595,8 +636,10 @@ with main_tab2:
     li_loss_pct = max(0.0, 100.0 - total_li_rec_pct)
     lioh_equiv_g_l = icp_li_1 * (MW_LIOH / MW_LI) / 1000.0
 
+    current_active_run = int(st.session_state["run_no"])
+
     rc1, rc2, rc3, rc4 = st.columns(4)
-    rc1.metric("🎯 총 Li 회수율", f"{total_li_rec_pct:.2f} %", f"총 회수: {mass_total_g[0]:.2f}g / 투입: {li_in_total_g:.2f}g")
+    rc1.metric(f"🎯 총 Li 회수율 (Run {current_active_run})", f"{total_li_rec_pct:.2f} %", f"총 회수: {mass_total_g[0]:.2f}g / 투입: {li_in_total_g:.2f}g")
     rc2.metric("1차 여액 회수율", f"{li_rec_1_pct:.2f} %", f"회수 질량: {mass_1_g[0]:.2f}g")
     rc3.metric("수세액 회수율", f"{li_rec_w_pct:.2f} %", f"회수 질량: {mass_w_g[0]:.2f}g")
     rc4.metric("케이크 잔류/손실률", f"{li_loss_pct:.2f} %", f"미회수: {li_in_total_g - mass_total_g[0]:.2f}g", delta_color="inverse")
@@ -627,13 +670,13 @@ with main_tab2:
     st.markdown("---")
     col_sv1, col_sv2 = st.columns([2, 1])
     with col_sv1:
-        save_clicked = st.button("💾 이 분석 결과를 트렌드 DB에 저장 (및 엑셀 리포트 자동 메일 발송)", type="primary", use_container_width=True)
+        save_clicked = st.button(f"💾 Run {current_active_run} 분석 결과를 트렌드 DB에 저장 (및 리포트 자동 발송)", type="primary", use_container_width=True)
     with col_sv2:
         st.session_state.auto_email_on_save = st.checkbox("저장 시 메일 자동 발송 켜기", value=st.session_state.auto_email_on_save)
 
     if save_clicked:
         new_row = {
-            "회차 (Run)": int(run_no),
+            "회차 (Run)": int(current_active_run),
             "구분": "실측치 (Actual)",
             "Li 회수율 (%)": round(total_li_rec_pct, 2), 
             "1차여액 Li농도 (mg/L)": round(icp_li_1, 1),
@@ -643,13 +686,13 @@ with main_tab2:
             "CaO 활성도 (%)": 100.0,
             "신품 CaO 보충량 (g)": round(fresh_makeup, 2)
         }
-        st.session_state.history = st.session_state.history[st.session_state.history["회차 (Run)"] != run_no]
+        st.session_state.history = st.session_state.history[st.session_state.history["회차 (Run)"] != current_active_run]
         st.session_state.history = pd.concat([st.session_state.history, pd.DataFrame([new_row])]).sort_values("회차 (Run)").reset_index(drop=True)
-        st.success(f"✅ Run {run_no} ICP 분석 데이터가 트렌드 DB에 영구 등록되었습니다!")
+        st.success(f"✅ Run {current_active_run} ICP 분석 데이터가 트렌드 DB에 영구 등록되었습니다!")
 
         if st.session_state.auto_email_on_save:
             ok, msg_res = send_email_report(
-                run_num=run_no, mass_cls=mass_closure, loss_m=loss_mass,
+                run_num=current_active_run, mass_cls=mass_closure, loss_m=loss_mass,
                 li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
                 lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
                 si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
@@ -855,7 +898,10 @@ with main_tab4:
         st.warning(f"⚠️ **[실험 주의사항]**\n{doe.get('precautions', '-')}")
 
         if st.button("📥 이 추천 레시피를 1번 탭 입력창에 즉시 반영하기", type="primary"):
-            st.session_state["run_no"] = rec.get("run_no", next_run_num)
+            r_apply = rec.get("run_no", next_run_num)
+            st.session_state["run_no"] = r_apply
+            st.session_state.tab1_run_no = r_apply
+            st.session_state.tab2_run_no = r_apply
             st.session_state["li2co3_mass"] = rec.get("li2co3_mass", 95.34)
             st.session_state["li2co3_water"] = rec.get("li2co3_water", 1040.0)
             st.session_state["fresh_cao_mass"] = rec.get("fresh_cao_mass", 68.52)
@@ -889,6 +935,7 @@ with main_tab5:
                 chat_model = get_best_gemini_model(api_key)
                 context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
 현재 공정 데이터:
+- 실험 회차: Run {st.session_state['run_no']}
 - Li 회수율: {total_li_rec_pct:.2f}% (1차 여액 {li_rec_1_pct:.1f}% + 수세액 {li_rec_w_pct:.1f}%)
 - 1차 여액 LiOH 농도: {lioh_equiv_g_l:.2f} g/L, Ca: {icp_ca_1} mg/L, Na: {icp_na_1} mg/L
 - LOI: {loi_pct:.2f}%, M/B 정합성: {mass_closure:.2f}%
@@ -997,9 +1044,9 @@ with main_tab6:
                         st.error(f"❌ **[인증 실패]** 상세 원인: {err}")
 
     with col_t2:
-        if st.button("📨 현재 회차 리포트 수동 발송", type="primary", use_container_width=True):
+        if st.button(f"📨 현재 회차 (Run {st.session_state['run_no']}) 리포트 수동 발송", type="primary", use_container_width=True):
             ok, msg_res = send_email_report(
-                run_num=run_no, mass_cls=mass_closure, loss_m=loss_mass,
+                run_num=int(st.session_state["run_no"]), mass_cls=mass_closure, loss_m=loss_mass,
                 li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
                 lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
                 si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
