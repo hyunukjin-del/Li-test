@@ -23,7 +23,10 @@ MW_SI = 28.09
 MW_MG = 24.31
 MW_K = 39.10
 
-st.set_page_config(page_title="습식반응 M/B & ICP 분석 Agent", page_icon="🧪", layout="wide")
+# 에이전트 제목 설정
+AGENT_TITLE = "LC-LH전환반응 M/B자동화 및 거동예측 Agent tool"
+
+st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
 
 # 세션 상태 초기화
 if "history" not in st.session_state:
@@ -43,17 +46,17 @@ if "history" not in st.session_state:
 
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
-        {"role": "assistant", "content": "안녕하세요! 습식 가성화 및 Ca-Loop 공정 전문 AI 에이전트입니다. M/B 연산, ICP 분석 결과 해석, 회차별 트렌드 예측에 대해 무엇이든 물어보세요."}
+        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 탄산리튬(LC)에서 수산화리튬(LH)으로의 가성화 M/B 연산, ICP 불순물 분석, 회차별 거동예측에 대해 무엇이든 질문해 주세요."}
     ]
 
-st.title("🧪 습식반응 및 Ca-Loop M/B 자동화 & ICP 분석 Agent")
-st.caption("화학양론 M/B 연산 | ICP 성분별 회수율 및 불순물 분석 | 회차별 트렌드 예측 | 리포트 메일 발송")
+st.title(f"🧪 {AGENT_TITLE}")
+st.caption("탄산리튬(LC) → 수산화리튬(LH) 가성화 양론 연산 | ICP 성분별 회수율 및 불순물 분석 | 회차별 거동예측 | 리포트 메일 발송")
 
-# 상단 탭 구성 (분석결과 탭 독립 배치)
+# 상단 탭 구성
 main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
     "1️⃣ 실험 데이터 입력 & M/B 연산", 
-    "2️⃣ 🧪 분석결과 (ICP 성분 & 회수율)", 
-    "3️⃣ 📈 회차별 트렌드 & 가상 예측", 
+    "2️⃣ 🧪 용액 ICP 분석 & 회수율", 
+    "3️⃣ 📈 회차별 트렌드 & 거동예측", 
     "4️⃣ 💬 AI 공정 대화창", 
     "5️⃣ 📧 리포트 메일 발송"
 ])
@@ -62,10 +65,11 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5 = st.tabs([
 # TAB 1: 실험 데이터 입력 및 기초 M/B 연산
 # --------------------------------------------------------------------------
 with main_tab1:
-    with st.expander("📝 기본 공정 수치 입력 (원료, 여과, 수세, 소성)", expanded=True):
+    with st.expander("📝 이번 회차 실험 수치 입력 폼", expanded=True):
+        # 1. 상단: 투입 원료 vs 1차 여과 및 케이크 수세
         col_in1, col_in2 = st.columns(2)
         with col_in1:
-            st.markdown("#### [투입 원료 및 반응 조건]")
+            st.markdown("#### [1. 투입 원료 및 반응 조건]")
             run_no = st.number_input("실험 회차 (Run No.)", min_value=1, value=len(st.session_state.history), step=1)
             li2co3_mass = st.number_input("Li₂CO₃ 투입량 (g)", value=95.34, format="%.2f")
             li2co3_water = st.number_input("Li₂CO₃ 용매수 (g)", value=1040.0, format="%.1f")
@@ -76,18 +80,28 @@ with main_tab1:
             time_h = st.number_input("반응 시간 (시간)", value=2.0, format="%.1f")
 
         with col_in2:
-            st.markdown("#### [여과, 수세 및 소성(하소)]")
+            st.markdown("#### [2. 1차 여과 및 케이크 수세]")
             primary_filtrate_mass = st.number_input("1차 LiOH 여액 무게 (g)", value=1646.0, format="%.1f")
             primary_filtrate_sg = st.number_input("1차 여액 비중 (g/mL)", value=1.035, format="%.3f")
             primary_filtrate_ph = st.number_input("1차 여액 pH", value=12.81, format="%.2f")
             wet_cake_mass = st.number_input("1차 습케이크 무게 (g)", value=311.0, format="%.1f")
             sample_wet = st.number_input("함수율 측정 샘플 습중량 (g)", value=27.7, format="%.1f")
             sample_dry = st.number_input("함수율 측정 샘플 건중량 (g)", value=14.8, format="%.1f")
-            wash_sol_mass = st.number_input("수세액 무게 (g)", value=832.0, format="%.1f")
+            wash_sol_mass = st.number_input("회수된 수세액 무게 (g)", value=832.0, format="%.1f")
             wash_sol_sg = st.number_input("수세액 비중 (g/mL)", value=1.000, format="%.3f")
             wash_sol_ph = st.number_input("수세액 pH", value=13.70, format="%.2f")
-            test_dry_cake = st.number_input("소성 투입 건조케익 (g)", value=40.6, format="%.1f")
-            calcined_cao = st.number_input("소성 회수 CaO (g)", value=23.9, format="%.1f")
+
+        st.divider()
+
+        # 2. 하단: 소성(하소) 및 CaO 재생 (여과/수세 아래에 별도 배치)
+        st.markdown("#### [3. CaCO₃ 소성(하소) 및 CaO 재생]")
+        col_calc1, col_calc2 = st.columns(2)
+        with col_calc1:
+            test_dry_cake = st.number_input("소성 투입 건조케익 샘플 (g)", value=40.6, format="%.1f")
+            calcined_cao = st.number_input("소성 후 회수된 CaO (g)", value=23.9, format="%.1f")
+        with col_calc2:
+            calc_temp = st.number_input("소성 온도 (℃)", value=1000.0, format="%.1f")
+            calc_time = st.number_input("소성 시간 (시간)", value=1.0, format="%.1f")
 
     # M/B 기본 연산 로직
     n_li2co3 = li2co3_mass / MW_LI2CO3
@@ -121,33 +135,33 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 분석결과 (ICP 성분 입력 & 하단 회수율 자동 계산)
+# TAB 2: 🧪 용액 ICP 분석 (mg/L 단위 표기 & 하단 회수율 자동 계산)
 # --------------------------------------------------------------------------
 with main_tab2:
-    st.header("🧪 용액 ICP 분석 결과 입력 및 회수율 계산")
-    st.markdown("1차 여액 및 수세액의 성분 농도(**mg/L**)를 입력하면, **투입량 대비 리튬 회수율과 성분별 물질수지**를 하단에 즉시 계산합니다.")
+    st.header("🧪 용액 ICP 분석 데이터 입력 및 회수율 계산")
+    st.markdown("1차 여액 및 수세액의 각 성분 농도(**mg/L**)를 입력하면, **투입량 대비 리튬 회수율과 성분별 물질수지**를 하단에 즉시 계산합니다.")
 
-    # [1] ICP 농도 입력 폼 (2개 컬럼)
-    st.markdown("### 1. ICP 분석 데이터 입력 (단위: mg/L)")
+    # [1] ICP 농도 입력 폼 (2개 컬럼, 각 항목에 mg/L 명시)
+    st.markdown("### 1. ICP 분석 데이터 입력")
     icp_col1, icp_col2 = st.columns(2)
 
     with icp_col1:
         st.markdown(f"#### 🔹 1차 여액 분석치 (부피: {primary_filtrate_mass/primary_filtrate_sg:.1f} mL)")
-        icp_li_1 = st.number_input("Li (리튬) - 1차 여액", value=10500.0, step=50.0, format="%.1f")
-        icp_ca_1 = st.number_input("Ca (칼슘) - 1차 여액", value=120.0, step=5.0, format="%.1f")
-        icp_na_1 = st.number_input("Na (나트륨) - 1차 여액", value=45.0, step=1.0, format="%.1f")
-        icp_si_1 = st.number_input("Si (규소) - 1차 여액", value=8.5, step=0.5, format="%.1f")
-        icp_mg_1 = st.number_input("Mg (마그네슘) - 1차 여액", value=1.2, step=0.1, format="%.1f")
-        icp_k_1  = st.number_input("K (칼륨) - 1차 여액", value=15.0, step=1.0, format="%.1f")
+        icp_li_1 = st.number_input("Li 농도 (mg/L) - 1차 여액", value=10500.0, step=50.0, format="%.1f")
+        icp_ca_1 = st.number_input("Ca 농도 (mg/L) - 1차 여액", value=120.0, step=5.0, format="%.1f")
+        icp_na_1 = st.number_input("Na 농도 (mg/L) - 1차 여액", value=45.0, step=1.0, format="%.1f")
+        icp_si_1 = st.number_input("Si 농도 (mg/L) - 1차 여액", value=8.5, step=0.5, format="%.1f")
+        icp_mg_1 = st.number_input("Mg 농도 (mg/L) - 1차 여액", value=1.2, step=0.1, format="%.1f")
+        icp_k_1  = st.number_input("K 농도 (mg/L) - 1차 여액", value=15.0, step=1.0, format="%.1f")
 
     with icp_col2:
         st.markdown(f"#### 🔹 수세액 분석치 (부피: {wash_sol_mass/wash_sol_sg:.1f} mL)")
-        icp_li_w = st.number_input("Li (리튬) - 수세액", value=1400.0, step=50.0, format="%.1f")
-        icp_ca_w = st.number_input("Ca (칼슘) - 수세액", value=80.0, step=5.0, format="%.1f")
-        icp_na_w = st.number_input("Na (나트륨) - 수세액", value=6.0, step=1.0, format="%.1f")
-        icp_si_w = st.number_input("Si (규소) - 수세액", value=2.1, step=0.5, format="%.1f")
-        icp_mg_w = st.number_input("Mg (마그네슘) - 수세액", value=0.3, step=0.1, format="%.1f")
-        icp_k_w  = st.number_input("K (칼륨) - 수세액", value=2.0, step=1.0, format="%.1f")
+        icp_li_w = st.number_input("Li 농도 (mg/L) - 수세액", value=1400.0, step=50.0, format="%.1f")
+        icp_ca_w = st.number_input("Ca 농도 (mg/L) - 수세액", value=80.0, step=5.0, format="%.1f")
+        icp_na_w = st.number_input("Na 농도 (mg/L) - 수세액", value=6.0, step=1.0, format="%.1f")
+        icp_si_w = st.number_input("Si 농도 (mg/L) - 수세액", value=2.1, step=0.5, format="%.1f")
+        icp_mg_w = st.number_input("Mg 농도 (mg/L) - 수세액", value=0.3, step=0.1, format="%.1f")
+        icp_k_w  = st.number_input("K 농도 (mg/L) - 수세액", value=2.0, step=1.0, format="%.1f")
 
     st.divider()
 
@@ -157,7 +171,7 @@ with main_tab2:
     v1_L = (primary_filtrate_mass / primary_filtrate_sg) / 1000.0
     vw_L = (wash_sol_mass / wash_sol_sg) / 1000.0
 
-    # Li 투입량 계산
+    # Li 총 투입량
     li_in_total_g = n_li2co3 * 2.0 * MW_LI
 
     # 각 성분별 회수 질량 (g) = 농도(mg/L) * 부피(L) / 1000
@@ -169,14 +183,14 @@ with main_tab2:
     mass_w_g = [c * vw_L / 1000.0 for c in conc_w]
     mass_total_g = [m1 + mw for m1, mw in zip(mass_1_g, mass_w_g)]
 
-    # 리튬 세부 회수율
+    # 리튬 세부 회수율 계산
     li_rec_1_pct = (mass_1_g[0] / li_in_total_g) * 100.0 if li_in_total_g > 0 else 0.0
     li_rec_w_pct = (mass_w_g[0] / li_in_total_g) * 100.0 if li_in_total_g > 0 else 0.0
     total_li_rec_pct = li_rec_1_pct + li_rec_w_pct
     li_loss_pct = max(0.0, 100.0 - total_li_rec_pct)
     lioh_equiv_g_l = icp_li_1 * (MW_LIOH / MW_LI) / 1000.0
 
-    # 핵심 회수율 메트릭 카드
+    # 메트릭 카드
     rc1, rc2, rc3, rc4 = st.columns(4)
     rc1.metric("🎯 총 Li 회수율", f"{total_li_rec_pct:.2f} %", f"총 회수: {mass_total_g[0]:.2f}g / 투입: {li_in_total_g:.2f}g")
     rc2.metric("1차 여액 회수율", f"{li_rec_1_pct:.2f} %", f"회수 질량: {mass_1_g[0]:.2f}g")
@@ -213,11 +227,11 @@ with main_tab2:
     st.markdown("##### 🤖 ICP 분석 기반 AI 공정 진단")
     icp_diags = []
     if icp_ca_1 > 200.0:
-        icp_diags.append(f"여액 내 Ca 농도가 {icp_ca_1:.1f} mg/L로 높습니다. CaO 과잉 또는 미세 고형분 유출 가능성이 있으므로 탄산화(Carbonation) 후처리 탈칼슘 공정이 권장됩니다.")
+        icp_diags.append(f"여액 내 Ca 농도가 {icp_ca_1:.1f} mg/L로 높습니다. CaO 과잉 또는 미세 고형분 유출 가능성이 있으므로 탄산화(Carbonation) 탈칼슘 후처리가 필요합니다.")
     if li_rec_w_pct > 10.0:
-        icp_diags.append(f"수세액에서 전체 리튬의 {li_rec_w_pct:.1f}%가 회수되었습니다. 케이크 여과 탈수 효율을 높여 1차 회수율을 극대화할 필요가 있습니다.")
+        icp_diags.append(f"수세액에서 전체 리튬의 {li_rec_w_pct:.1f}%가 회수되었습니다. 케이크 여과 탈수 효율을 높여 1차 여액 회수율을 극대화할 필요가 있습니다.")
     if icp_na_1 > 50.0 or icp_k_1 > 20.0:
-        icp_diags.append(f"알칼리 불순물(Na: {icp_na_1} mg/L, K: {icp_k_1} mg/L)은 수용성이 높아 여액에 100% 잔류하므로, 결정화 단계 전 원료 순도 관리가 필요합니다.")
+        icp_diags.append(f"알칼리 불순물(Na: {icp_na_1} mg/L, K: {icp_k_1} mg/L)은 수용성이 높아 여액에 100% 잔류하므로, 농축/결정화 단계 전 원료 순도 관리가 요구됩니다.")
 
     if not icp_diags:
         icp_diags.append("모든 불순물(Ca, Na, Si, Mg, K) 수치와 Li 회수율이 정상 관리 범위 내에 있습니다.")
@@ -243,12 +257,12 @@ with main_tab2:
         st.success(f"✅ Run {run_no} ICP 분석 및 회수율 데이터가 트렌드 DB에 영구 등록되었습니다!")
 
 # --------------------------------------------------------------------------
-# TAB 3: 📈 회차별 트렌드 & 가상 예측
+# TAB 3: 📈 회차별 트렌드 & 거동예측
 # --------------------------------------------------------------------------
 with main_tab3:
-    st.header("📈 $n$회차 트렌드 시각화 & 임의 조건 예측 시뮬레이터")
+    st.header("📈 $n$회차 트렌드 시각화 & 거동예측 시뮬레이터")
     
-    with st.expander("⚙️ 임의 조건 예측 파라미터 설정 (What-If Simulation)", expanded=True):
+    with st.expander("⚙️ 거동예측 시뮬레이션 파라미터 설정 (What-If Simulation)", expanded=True):
         col_p1, col_p2, col_p3 = st.columns(3)
         with col_p1:
             target_max_run = st.slider("예측 시뮬레이션 목표 회차", min_value=3, max_value=20, value=10, step=1)
@@ -342,20 +356,20 @@ with main_tab4:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if user_prompt := st.chat_input("질문을 입력하세요 (예: Ca 농도가 120ppm이면 제품에 문제 없어?)"):
+    if user_prompt := st.chat_input("질문을 입력하세요 (예: Ca 농도가 120ppm이면 제품 순도에 영향이 커?)"):
         st.session_state.chat_messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
             st.markdown(user_prompt)
 
         prompt_low = user_prompt.lower()
         if "ca" in prompt_low or "칼슘" in prompt_low or "불순물" in prompt_low:
-            ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. 배터리급 수산화리튬 스펙(통상 Ca < 10~20 ppm) 대비 높으므로, 증발 농축/결정화 전에 CO₂ 가스를 불어넣어 탄산칼슘으로 침전 분리하는 **2차 탄산화(Carbonation) 탈칼슘 공정**을 거쳐야 합니다."
+            ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. 배터리급 수산화리튬(LH) 스펙 대비 높으므로, 증발 농축/결정화 전에 CO₂ 가스를 불어넣어 침전 분리하는 **2차 탄산화(Carbonation) 탈칼슘 공정**을 거치는 것을 권장합니다."
         elif "ph" in prompt_low or "수세" in prompt_low or "세척" in prompt_low:
             ai_reply = f"수세액 pH가 **{wash_sol_ph}**로 높은 이유는 1차 감압 여과 후 케이크 기공 내 LiOH 고농도 액이 갇혀 있었기 때문입니다. 3배수 수세를 통해 총 {mass_w_g[0]:.2f}g의 Li(회수율 기여도 {li_rec_w_pct:.2f}%)을 회수하였습니다."
         elif "소결" in prompt_low or "sintering" in prompt_low or "퍼지" in prompt_low:
             ai_reply = f"1000℃ 고온 하소가 반복되면 활성도가 회차당 약 {sintering_decay}%씩 저하됩니다. 회수율을 90% 이상 유지하려면 약 6~7회차 시점에 재생 CaO 일부를 퍼지(Purge)하고 신품 CaO로 리프레시해 주시는 것이 좋습니다."
         else:
-            ai_reply = f"Run {run_no}의 총 Li 회수율은 **{total_li_rec_pct:.2f}%** (1차 여액 {li_rec_1_pct:.1f}% + 수세액 {li_rec_w_pct:.1f}%)로 산출되었습니다. 추가로 알고 싶으신 공정 조건이나 불순물 제어 방안이 있으신가요?"
+            ai_reply = f"Run {run_no}의 총 Li 회수율은 **{total_li_rec_pct:.2f}%** (1차 여액 {li_rec_1_pct:.1f}% + 수세액 {li_rec_w_pct:.1f}%)로 산출되었습니다. 추가로 확인하고 싶은 반응 변수나 거동 조건이 있으신가요?"
 
         st.session_state.chat_messages.append({"role": "assistant", "content": ai_reply})
         with st.chat_message("assistant"):
@@ -365,14 +379,14 @@ with main_tab4:
 # TAB 5: 📧 리포트 메일 발송
 # --------------------------------------------------------------------------
 with main_tab5:
-    st.header("📧 M/B 및 ICP 분석 엑셀 리포트 메일 발송")
+    st.header(f"📧 {AGENT_TITLE} 결과 메일 발송")
     st.markdown("ICP 분석표 및 M/B 결과가 포함된 엑셀 파일(`.xlsx`)을 메일로 전송합니다.")
 
     col_m1, col_m2 = st.columns(2)
     with col_m1:
         recipient_email = st.text_input("수신자 이메일 주소", value="user@company.com")
-        email_subject = st.text_input("메일 제목", value=f"[M/B & ICP 리포트] Run {run_no} 습식반응 종합 브리핑")
-        sender_email = st.text_input("발신자 이메일 주소", value="sender@gmail.com")
+        email_subject = st.text_input("메일 제목", value=f"[{AGENT_TITLE}] Run {run_no} 종합 브리핑")
+        sender_email = st.text_input("발신자 이메일 주소 (Gmail/SMTP)", value="sender@gmail.com")
         sender_password = st.text_input("발신자 앱 비밀번호 (16자리)", type="password")
 
     with col_m2:
@@ -416,7 +430,7 @@ with main_tab5:
                 msg["Subject"] = email_subject
 
                 html_body = f"""
-                <h3>🧪 습식반응 및 Ca-Loop Run {run_no} M/B & ICP 분석 리포트</h3>
+                <h3>🧪 {AGENT_TITLE} - Run {run_no} 리포트</h3>
                 <hr>
                 <ul>
                     <li><b>총 Li 회수율:</b> {total_li_rec_pct:.2f}% (1차 여액: {li_rec_1_pct:.2f}%, 수세액: {li_rec_w_pct:.2f}%)</li>
