@@ -349,7 +349,7 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
 ])
 
 # --------------------------------------------------------------------------
-# TAB 1: 실험 데이터 입력 및 기초 M/B 연산 (수세수 투입량 항목 탑재)
+# TAB 1: 실험 데이터 입력 및 기초 M/B 연산
 # --------------------------------------------------------------------------
 with main_tab1:
     with st.expander("📷 [AI Vision] 수기 실험 노트/기록지 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
@@ -423,7 +423,7 @@ with main_tab1:
             calc_dry_caco3_val = wet_cake_mass * (sample_dry / sample_wet) if sample_wet > 0 else 0.0
             st.success(f"🧱 **CaCO₃ 함수율:** `{calc_moisture_val:.2f} %` | **함수율 기준 건조 CaCO₃ 무게:** `{calc_dry_caco3_val:.1f} g`")
 
-            # 수세수 투입량 (신규 추가 항목)
+            # 수세수 투입량
             wash_water_in = st.number_input("💧 투입된 수세수 무게 (g)", value=float(st.session_state["wash_water_in"]), format="%.1f", key="inp_wash_water_in")
             
             # 수세 배수 실시간 계산
@@ -482,7 +482,7 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 LiOH 용액 & CaCO₃ 통합 분석 (wt% 고체 포함)
+# TAB 2: 🧪 LiOH 용액 & CaCO₃ 통합 분석 (막대그래프 시각화 탑재)
 # --------------------------------------------------------------------------
 with main_tab2:
     col_hdr1, col_hdr2 = st.columns([3, 1])
@@ -687,6 +687,18 @@ with main_tab2:
     m3.metric("📊 총 Li 원소 닫힘율 (Closure)", f"{total_li_closure_pct:.2f} %", f"총 산출: {mass_total_out_g[0]:.2f}g / 투입: {li_in_total_g:.2f}g")
     m4.metric("LiOH 용액 농도", f"{lioh_equiv_g_l:.2f} g/L", f"Li: {icp_li_1:,.1f} mg/L")
 
+    # 원소별 분배율 % 리스트
+    dist_1_pct = [(m1 / mt * 100.0) if mt > 0 else 0.0 for m1, mt in zip(mass_1_g, mass_total_out_g)]
+    dist_w_pct = [(mw / mt * 100.0) if mt > 0 else 0.0 for mw, mt in zip(mass_w_g, mass_total_out_g)]
+    dist_s_pct = [(ms / mt * 100.0) if mt > 0 else 0.0 for ms, mt in zip(mass_s_g, mass_total_out_g)]
+    dist_tot_sol_pct = [d1 + dw for d1, dw in zip(dist_1_pct, dist_w_pct)]
+
+    # Li의 경우 투입 기준 회수율을 병기하기 위해 Li만 투입 기준 %로 교체
+    dist_1_pct[0] = li_rec_1_pct
+    dist_w_pct[0] = li_rec_w_pct
+    dist_s_pct[0] = li_cake_loss_pct
+    dist_tot_sol_pct[0] = total_li_solution_rec_pct
+
     df_integrated_summary = pd.DataFrame({
         "원소 (Element)": elements,
         "LiOH 용액 (g)": [round(x, 4) for x in mass_1_g],
@@ -694,14 +706,8 @@ with main_tab2:
         "CaCO₃ (g)": [round(x, 4) for x in mass_s_g],
         "CaCO₃ 함량 (wt%)": [f"{w:.3f} %" for w in wt_solid],
         "총 산출량 (g)": [round(x, 4) for x in mass_total_out_g],
-        "용액 회수 분배율 (%)": [
-            f"{((m1 + mw) / mt * 100):.1f} %" if mt > 0 else "-" 
-            for m1, mw, mt in zip(mass_1_g, mass_w_g, mass_total_out_g)
-        ],
-        "CaCO₃ 잔류 분배율 (%)": [
-            f"{(ms / mt * 100):.1f} %" if mt > 0 else "-" 
-            for ms, mt in zip(mass_s_g, mass_total_out_g)
-        ]
+        "용액 회수 분배율 (%)": [f"{p:.2f} %" for p in dist_tot_sol_pct],
+        "CaCO₃ 잔류 분배율 (%)": [f"{p:.2f} %" for p in dist_s_pct]
     })
 
     st.markdown("##### 📋 LiOH 용액, 수세액 및 CaCO₃ 통합 원소 분배표")
@@ -714,6 +720,49 @@ with main_tab2:
         }),
         use_container_width=True
     )
+
+    # ----------------------------------------------------------------------
+    # [3] 📊 원소별 회수율/분배율 막대그래프 시각화 (신규 추가)
+    # ----------------------------------------------------------------------
+    st.markdown("---")
+    st.subheader(f"📊 Run {current_active_run} 원소별 회수율 및 스트림 분배 막대그래프")
+
+    col_g_opt1, col_g_opt2 = st.columns([2, 3])
+    with col_g_opt1:
+        graph_view_mode = st.radio(
+            "📌 그래프 보기 모드 선택",
+            [
+                "1. 스트림별 전체 구분 (LiOH 용액 / 수세액 / CaCO₃)",
+                "2. 용액 스트림만 구분 (LiOH 용액 vs 수세액)",
+                "3. 용액 총 회수율 통합 보기 (LiOH 용액 + 수세액)"
+            ],
+            horizontal=False
+        )
+
+    # 차트용 데이터프레임 구성
+    if graph_view_mode.startswith("1."):
+        df_bar = pd.DataFrame({
+            "LiOH 용액 (여과액)": [round(p, 2) for p in dist_1_pct],
+            "수세액": [round(p, 2) for p in dist_w_pct],
+            "CaCO₃ 고체 잔류": [round(p, 2) for p in dist_s_pct]
+        }, index=elements)
+        st.caption("ℹ️ **스트림별 전체 분배율 (%):** 각 원소가 LiOH 용액(여액), 수세액, CaCO₃ 고체로 분배된 비율입니다. (Li는 총 투입량 기준 회수율 %)")
+        st.bar_chart(df_bar, height=360, use_container_width=True)
+
+    elif graph_view_mode.startswith("2."):
+        df_bar = pd.DataFrame({
+            "LiOH 용액 (여과액)": [round(p, 2) for p in dist_1_pct],
+            "수세액": [round(p, 2) for p in dist_w_pct]
+        }, index=elements)
+        st.caption("ℹ️ **용액 스트림 분배율 (%):** LiOH 용액과 수세액으로 각각 회수/용출된 비율 비교입니다.")
+        st.bar_chart(df_bar, height=360, use_container_width=True)
+
+    else: # 3. 통합 보기
+        df_bar = pd.DataFrame({
+            "용액 총 회수/용출률 (LiOH용액 + 수세액)": [round(p, 2) for p in dist_tot_sol_pct]
+        }, index=elements)
+        st.caption("ℹ️ **용액 총 회수율 (%):** 1차 LiOH 용액과 수세액을 합산한 액체 스트림 총 회수율/용출률입니다.")
+        st.bar_chart(df_bar, height=360, use_container_width=True)
 
     st.markdown("---")
     col_sv1, col_sv2 = st.columns([2, 1])
