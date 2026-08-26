@@ -56,6 +56,7 @@ DEFAULT_DATA = {
     "calcined_cao": 23.9,
     "calc_temp": 1000.0,
     "calc_time": 1.0,
+    # 액체 ICP 분석 (mg/L)
     "icp_li_1": 10500.0,
     "icp_ca_1": 120.0,
     "icp_na_1": 45.0,
@@ -68,6 +69,13 @@ DEFAULT_DATA = {
     "icp_si_w": 2.1,
     "icp_mg_w": 0.3,
     "icp_k_w": 2.0,
+    # 고체 케이크 분석 (wt%)
+    "solid_li_wt": 0.38,
+    "solid_ca_wt": 38.20,
+    "solid_na_wt": 0.015,
+    "solid_si_wt": 0.045,
+    "solid_mg_wt": 0.008,
+    "solid_k_wt": 0.010,
 }
 
 for k, v in DEFAULT_DATA.items():
@@ -88,7 +96,6 @@ def sync_run_from_tab2():
     st.session_state["run_no"] = st.session_state.tab2_run_no
     st.session_state.tab1_run_no = st.session_state.tab2_run_no
 
-# Secrets에 저장된 GEMINI_API_KEY 자동 로드
 secret_key = ""
 try:
     if "GEMINI_API_KEY" in st.secrets:
@@ -131,7 +138,7 @@ if "history" not in st.session_state:
 
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
-        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. Google Gemini Vision 기반 사진 인식, 자율 DoE 실험 설계, M/B 연산에 대해 무엇이든 질문해 주세요."}
+        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 액체(mg/L) 및 고체(wt%) 통합 분석, M/B 연산, DoE 추천에 대해 질문해 주세요."}
     ]
 
 # --------------------------------------------------------------------------
@@ -174,40 +181,25 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
 
         if doc_type == "lab_note":
             prompt = """이 이미지는 탄산리튬(LC) 가성화 및 Ca-Loop 습식 공정의 수기 실험 노트 또는 기록지입니다.
-이미지에 적힌 수치를 정확히 읽어내어 아래 JSON 포맷으로만 반환해 주세요.
-단위(g, mL, ℃ 등)는 제외하고 순수 숫자(float)만 넣어주세요. 판독할 수 없는 항목은 null로 설정하세요.
+이미지에 적힌 수치를 정확히 읽어내어 아래 JSON 포맷으로만 반환해 주세요. 단위는 제외하고 순수 숫자(float)만 넣어주세요.
 
 {
-  "run_no": number,
-  "li2co3_mass": number,
-  "li2co3_water": number,
-  "fresh_cao_mass": number,
-  "recycled_cao_mass": number,
-  "slurry_water": number,
-  "temp_c": number,
-  "time_h": number,
-  "primary_filtrate_mass": number,
-  "primary_filtrate_sg": number,
-  "primary_filtrate_ph": number,
-  "wet_cake_mass": number,
-  "sample_wet": number,
-  "sample_dry": number,
-  "wash_sol_mass": number,
-  "wash_sol_sg": number,
-  "wash_sol_ph": number,
-  "test_dry_cake": number,
-  "calcined_cao": number
+  "run_no": number, "li2co3_mass": number, "li2co3_water": number,
+  "fresh_cao_mass": number, "recycled_cao_mass": number, "slurry_water": number,
+  "temp_c": number, "time_h": number, "primary_filtrate_mass": number,
+  "primary_filtrate_sg": number, "primary_filtrate_ph": number,
+  "wet_cake_mass": number, "sample_wet": number, "sample_dry": number,
+  "wash_sol_mass": number, "wash_sol_sg": number, "wash_sol_ph": number,
+  "test_dry_cake": number, "calcined_cao": number
 }"""
         else:
-            prompt = """이 이미지는 용액 ICP 분석 기기 화면 또는 시험 성적서 인쇄물입니다.
-1차 여액(Primary Filtrate)과 수세액(Wash Solution)의 Li, Ca, Na, Si, Mg, K 농도(mg/L)를 추출하여 아래 JSON 포맷으로만 반환해 주세요.
-단위는 제외하고 순수 숫자만 넣어주세요. 판독할 수 없는 항목은 null로 설정하세요.
+            prompt = """이 이미지는 용액(1차 여액, 수세액 mg/L) 및 건조 케이크(고체 wt%) ICP/XRF 성적서입니다.
+추출 가능한 수치를 아래 JSON 포맷으로 반환해 주세요.
 
 {
-  "icp_li_1": number, "icp_ca_1": number, "icp_na_1": number,
-  "icp_si_1": number, "icp_mg_1": number, "icp_k_1": number,
-  "icp_li_w": number, "icp_ca_w": number, "icp_na_w": number,
-  "icp_si_w": number, "icp_mg_w": number, "icp_k_w": number
+  "icp_li_1": number, "icp_ca_1": number, "icp_na_1": number, "icp_si_1": number, "icp_mg_1": number, "icp_k_1": number,
+  "icp_li_w": number, "icp_ca_w": number, "icp_na_w": number, "icp_si_w": number, "icp_mg_w": number, "icp_k_w": number,
+  "solid_li_wt": number, "solid_ca_wt": number, "solid_na_wt": number, "solid_si_wt": number, "solid_mg_wt": number, "solid_k_wt": number
 }"""
 
         response = model.generate_content(
@@ -222,7 +214,7 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
 # --------------------------------------------------------------------------
 # [3] 이메일 발송 공통 함수
 # --------------------------------------------------------------------------
-def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w, 
+def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w, li_cake_loss,
                       lioh_conc, li_1, ca_1, na_1, si_1, mg_1, k_1, 
                       loi, purity, makeup, cao_rec, df_icp_tbl, df_sim_tbl, is_auto=True):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -245,14 +237,15 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
         ws1.title = "MB_종합결과"
         ws1.append(["지표명", "수치", "단위", "평가"])
         ws1.append(["실험 회차", run_num, "Run", "정상"])
-        ws1.append(["총 Li 회수율(ICP)", round(li_rec_tot, 2), "%", "1차여액+수세액"])
+        ws1.append(["총 Li 용액 회수율", round(li_rec_tot, 2), "%", "1차여액+수세액"])
+        ws1.append(["고체 케이크 Li 잔류율", round(li_cake_loss, 2), "%", "고체 손실"])
+        ws1.append(["총 Li 원소 정합성", round(li_rec_tot + li_cake_loss, 2), "%", "액체+고체 닫힘율"])
         ws1.append(["1차 여액 LiOH 농도", round(lioh_conc, 2), "g/L", f"Li: {li_1:.1f} mg/L"])
-        ws1.append(["M/B 정합성", round(mass_cls, 2), "%", f"증발 {loss_m:.1f}g"])
+        ws1.append(["전체 공정 M/B 닫힘율", round(mass_cls, 2), "%", f"증발 {loss_m:.1f}g"])
         ws1.append(["소성 감율(LOI)", round(loi, 2), "%", f"CaCO3 순도 ~{purity:.1f}%"])
-        ws1.append(["차기 신품 CaO 보충량", round(makeup, 2), "g", f"재생분 {cao_rec:.1f}g"])
 
         if df_icp_tbl is not None and not df_icp_tbl.empty:
-            ws2 = wb.create_sheet(title="ICP_원소분석")
+            ws2 = wb.create_sheet(title="액체_고체_통합원소분석")
             ws2.append(list(df_icp_tbl.columns))
             for _, r in df_icp_tbl.iterrows():
                 ws2.append(list(r.values))
@@ -268,28 +261,24 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
         excel_buf.seek(0)
         file_name = f"MB_Report_Run_{run_num:03d}.xlsx"
 
-        mail_subject = f"[{AGENT_TITLE}] Run {run_num} M/B 및 ICP 분석 종합 리포트"
+        mail_subject = f"[{AGENT_TITLE}] Run {run_num} 액체/고체 통합 M/B 종합 리포트"
         msg = MIMEMultipart()
         msg["From"] = sender
         msg["To"] = ", ".join(recipients)
         msg["Subject"] = mail_subject
 
         html_body = f"""
-        <h3>🧪 {AGENT_TITLE} - Run {run_num} 자동 리포트</h3>
+        <h3>🧪 {AGENT_TITLE} - Run {run_num} 종합 리포트</h3>
         <hr>
-        <h4>📊 핵심 KPI 요약</h4>
+        <h4>📊 핵심 원소 수지(Elemental M/B) 요약</h4>
         <ul>
-            <li><b>총 Li 회수율:</b> <span style="color:#0284C7; font-weight:bold;">{li_rec_tot:.2f}%</span> (1차 여액: {li_rec_1:.2f}%, 수세액: {li_rec_w:.2f}%)</li>
+            <li><b>총 Li 용액 회수율:</b> <span style="color:#0284C7; font-weight:bold;">{li_rec_tot:.2f}%</span> (1차 여액: {li_rec_1:.2f}%, 수세액: {li_rec_w:.2f}%)</li>
+            <li><b>고체 케이크 Li 잔류/손실률:</b> <span style="color:#E11D48; font-weight:bold;">{li_cake_loss:.2f}%</span></li>
+            <li><b>총 Li 원소 정합성(Closure):</b> <b>{li_rec_tot + li_cake_loss:.2f}%</b></li>
             <li><b>1차 여액 LiOH 농도:</b> {lioh_conc:.2f} g/L (Li: {li_1:,.1f} mg/L)</li>
-            <li><b>M/B 정합성(Closure):</b> {mass_cls:.2f}% (증발 손실: {loss_m:.1f}g)</li>
-            <li><b>소성 감율(LOI):</b> {loi:.2f}% (CaCO₃ 추정 순도: {purity:.1f}%)</li>
-            <li><b>차기(Run {run_num+1}) 신품 CaO 보충량:</b> {makeup:.2f}g</li>
+            <li><b>공정 무게 M/B 닫힘율:</b> {mass_cls:.2f}% (증발 손실: {loss_m:.1f}g)</li>
         </ul>
-        <h4>🧪 주요 불순물 농도 (1차 여액)</h4>
-        <ul>
-            <li>Ca: {ca_1} mg/L | Na: {na_1} mg/L | Si: {si_1} mg/L | Mg: {mg_1} mg/L | K: {k_1} mg/L</li>
-        </ul>
-        <p>※ 세부 분석 데이터 엑셀 파일(<b>{file_name}</b>)을 첨부하였습니다.</p>
+        <p>※ 액체(mg/L) 및 고체(wt%) 통합 분석 데이터 엑셀 파일(<b>{file_name}</b>)을 첨부하였습니다.</p>
         """
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
@@ -327,7 +316,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("🔑 Google Gemini AI 설정")
-    st.caption("Google AI Studio의 무료 API Key를 입력하세요.")
+    st.caption("무료 Gemini API Key로 사진 인식 및 자율 DoE 레시피를 생성합니다.")
     st.session_state.gemini_api_key = st.text_input(
         "Google Gemini API Key", 
         value=st.session_state.gemini_api_key, 
@@ -335,20 +324,18 @@ with st.sidebar:
         help="aistudio.google.com에서 발급받은 AIzaSy... 키를 입력하세요."
     )
     if st.session_state.gemini_api_key:
-        st.success("✅ Gemini AI 준비 완료 (최신 모델 연동)")
-    else:
-        st.info("💡 aistudio.google.com 에서 무료로 발급받은 키를 넣으시면 DoE 및 사진 인식이 활성화됩니다.")
+        st.success("✅ Gemini AI 준비 완료")
     st.divider()
 
 # --------------------------------------------------------------------------
 # [5] 메인 화면 및 6개 탭 구성
 # --------------------------------------------------------------------------
 st.title(f"🧪 {AGENT_TITLE}")
-st.caption("AI DoE 자율 실험계획 | Gemini 사진 인식 | M/B 자동 연산 | ICP 성분별 회수율 | 거동예측 | 리포트 자동 발송")
+st.caption("액체(mg/L) & 고체(wt%) 통합 분석 M/B | AI DoE 자율 실험계획 | Gemini 사진 인식 | 리포트 자동 발송")
 
 main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
     "1️⃣ 실험 데이터 입력 & M/B 연산", 
-    "2️⃣ 🧪 용액 ICP 분석 & 회수율", 
+    "2️⃣ 🧪 용액 & 고체 통합 분석 & 회수율", 
     "3️⃣ 📈 회차별 트렌드 & 거동예측", 
     "4️⃣ 🔬 AI 자율 실험계획 (DoE)",
     "5️⃣ 💬 AI 공정 대화창", 
@@ -395,7 +382,6 @@ with main_tab1:
         col_in1, col_in2 = st.columns(2)
         with col_in1:
             st.markdown("#### [1. 투입 원료 및 반응 조건]")
-            # 1번 탭 회차 입력창 (2번 탭과 양방향 연동)
             run_no = st.number_input(
                 "실험 회차 (Run No.)", 
                 min_value=1, 
@@ -466,14 +452,13 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 용액 ICP 분석 (실험회차 연동 탑재)
+# TAB 2: 🧪 용액 & 고체 통합 분석 (wt% 고체 분석 및 전체 수지 연산 탑재)
 # --------------------------------------------------------------------------
 with main_tab2:
-    # 2번 탭 상단: 회차 컨트롤 바 (1번 탭과 실시간 연동)
     col_hdr1, col_hdr2 = st.columns([3, 1])
     with col_hdr1:
-        st.header(f"🧪 용액 ICP 분석 & 회수율 계산 (Run {st.session_state['run_no']})")
-        st.caption("분석실 **성적서 사진(Gemini Vision)** 또는 **엑셀 파일**을 업로드하면 성분값이 자동 채워집니다.")
+        st.header(f"🧪 용액(mg/L) & 고체(wt%) 통합 분석 및 원소 수지 (Run {st.session_state['run_no']})")
+        st.caption("1차 여액 및 수세액뿐만 아니라 **건조 케이크(고체)의 성분(wt%)**까지 통합하여 전체 물질수지(Closure)를 계산합니다.")
     with col_hdr2:
         st.number_input(
             "📌 분석 대상 회차 (Run No.)", 
@@ -481,15 +466,15 @@ with main_tab2:
             value=int(st.session_state["run_no"]), 
             step=1, 
             key="tab2_run_no", 
-            on_change=sync_run_from_tab2,
-            help="이곳에서 회차를 변경하면 1번 탭 및 모든 결과 저장이 해당 회차로 즉시 연동됩니다."
+            on_change=sync_run_from_tab2
         )
 
-    with st.expander("📷 [AI Vision] ICP 성적서 / 기기 화면 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
+    # 📷 [AI Vision] 성적서 사진 인식
+    with st.expander("📷 [AI Vision] ICP/XRF 성적서 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
         col_icp_img1, col_icp_img2 = st.columns([2, 1])
         with col_icp_img1:
             uploaded_icp_img = st.file_uploader(
-                "ICP 성적서 또는 기기 화면 사진 업로드 (JPG, PNG)", 
+                "액체(mg/L) 및 고체(wt%) 성적서 사진 업로드 (JPG, PNG)", 
                 type=["jpg", "jpeg", "png"],
                 key="up_icp_img"
             )
@@ -497,8 +482,8 @@ with main_tab2:
             st.write("")
             st.write("")
             if uploaded_icp_img is not None:
-                if st.button("🚀 ICP 사진 판독 및 자동 입력", type="primary", use_container_width=True):
-                    with st.spinner("Gemini AI가 성분 분석표를 판독하고 있습니다..."):
+                if st.button("🚀 성적서 사진 판독 및 자동 입력", type="primary", use_container_width=True):
+                    with st.spinner("Gemini AI가 액체 및 고체 분석표를 판독하고 있습니다..."):
                         img_bytes = uploaded_icp_img.read()
                         parsed_icp, err = parse_image_with_vision(img_bytes, doc_type="icp_report")
                         if err:
@@ -507,27 +492,32 @@ with main_tab2:
                             for k, v in parsed_icp.items():
                                 if v is not None and k in st.session_state:
                                     st.session_state[k] = float(v)
-                            st.success("🎉 ICP 성분값(Li, Ca, Na, Si, Mg, K) 판독 및 자동 반영 완료!")
+                            st.success("🎉 액체(mg/L) 및 고체(wt%) 성분값 판독 및 자동 반영 완료!")
                             st.rerun()
 
+    # 📂 엑셀 파일 업로드
     with st.container():
         col_up1, col_up2 = st.columns([3, 1])
         with col_up1:
             uploaded_icp_file = st.file_uploader(
-                "📂 또는 ICP 분석 엑셀/CSV 파일 업로드 (형태 A)", 
+                "📂 또는 액체 & 고체 분석 엑셀/CSV 파일 업로드 (형태 A)", 
                 type=["xlsx", "xls", "csv"]
             )
         with col_up2:
             st.write("")
             st.write("")
             df_template = pd.DataFrame({
-                "시료명 (Sample)": ["1차 여액 (Primary Filtrate)", "수세액 (Wash Solution)"],
-                "Li (mg/L)": [10500.0, 1400.0],
-                "Ca (mg/L)": [120.0, 80.0],
-                "Na (mg/L)": [45.0, 6.0],
-                "Si (mg/L)": [8.5, 2.1],
-                "Mg (mg/L)": [1.2, 0.3],
-                "K (mg/L)": [15.0, 2.0]
+                "시료명 (Sample)": [
+                    "1차 여액 (Primary Filtrate) [mg/L]", 
+                    "수세액 (Wash Solution) [mg/L]", 
+                    "건조 케이크 (Dry Cake) [wt%]"
+                ],
+                "Li": [10500.0, 1400.0, 0.38],
+                "Ca": [120.0, 80.0, 38.20],
+                "Na": [45.0, 6.0, 0.015],
+                "Si": [8.5, 2.1, 0.045],
+                "Mg": [1.2, 0.3, 0.008],
+                "K":  [15.0, 2.0, 0.010]
             })
             tpl_buffer = io.BytesIO()
             with pd.ExcelWriter(tpl_buffer, engine='openpyxl') as writer:
@@ -535,9 +525,9 @@ with main_tab2:
             tpl_buffer.seek(0)
 
             st.download_button(
-                label="📥 표준 엑셀 양식 다운로드",
+                label="📥 표준 엑셀 양식(고체wt% 포함) 다운로드",
                 data=tpl_buffer,
-                file_name="ICP_Analysis_Template_FormA.xlsx",
+                file_name="Integrated_Liquid_Solid_ICP_Template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
@@ -557,25 +547,26 @@ with main_tab2:
                 if sample_col is None:
                     sample_col = df_up.columns[0]
 
-                row_1, row_w = None, None
+                row_1, row_w, row_s = None, None, None
                 for idx, val in df_up[sample_col].astype(str).items():
                     v_clean = val.strip().lower()
-                    if any(k in v_clean for k in ["1차", "여액", "primary", "1st", "filtrate"]): row_1 = idx
+                    if any(k in v_clean for k in ["1차", "primary", "1st", "filtrate"]): row_1 = idx
                     elif any(k in v_clean for k in ["수세", "세척", "wash"]): row_w = idx
-
-                if row_1 is None and len(df_up) >= 1: row_1 = 0
-                if row_w is None and len(df_up) >= 2: row_w = 1
+                    elif any(k in v_clean for k in ["고체", "케이크", "cake", "solid", "wt"]): row_s = idx
 
                 elem_mapping = {
-                    "Li": ("icp_li_1", "icp_li_w"), "Ca": ("icp_ca_1", "icp_ca_w"),
-                    "Na": ("icp_na_1", "icp_na_w"), "Si": ("icp_si_1", "icp_si_w"),
-                    "Mg": ("icp_mg_1", "icp_mg_w"), "K":  ("icp_k_1", "icp_k_w")
+                    "Li": ("icp_li_1", "icp_li_w", "solid_li_wt"),
+                    "Ca": ("icp_ca_1", "icp_ca_w", "solid_ca_wt"),
+                    "Na": ("icp_na_1", "icp_na_w", "solid_na_wt"),
+                    "Si": ("icp_si_1", "icp_si_w", "solid_si_wt"),
+                    "Mg": ("icp_mg_1", "icp_mg_w", "solid_mg_wt"),
+                    "K":  ("icp_k_1", "icp_k_w", "solid_k_wt")
                 }
 
                 matched_elems = []
                 for col in df_up.columns:
                     c_clean = str(col).strip().upper()
-                    for el, (k1, kw) in elem_mapping.items():
+                    for el, (k1, kw, ks) in elem_mapping.items():
                         tokens = [t.strip("()[],._") for t in c_clean.split()]
                         first_tok = tokens[0] if tokens else ""
                         if first_tok == el.upper() or c_clean.startswith(el.upper()):
@@ -583,86 +574,113 @@ with main_tab2:
                                 st.session_state[k1] = float(df_up.loc[row_1, col])
                             if row_w is not None and not pd.isna(df_up.loc[row_w, col]):
                                 st.session_state[kw] = float(df_up.loc[row_w, col])
+                            if row_s is not None and not pd.isna(df_up.loc[row_s, col]):
+                                st.session_state[ks] = float(df_up.loc[row_s, col])
                             matched_elems.append(el)
                             break
 
                 matched_elems = list(set(matched_elems))
-                st.success(f"🎉 엑셀 분석 완료! 매칭된 성분: **{', '.join(matched_elems)}**")
+                st.success(f"🎉 엑셀 분석 완료! 매칭된 원소: **{', '.join(matched_elems)}** (액체 & 고체 자동 반영)")
             except Exception as e:
                 st.error(f"❌ 엑셀 파싱 오류: {e}")
 
     st.divider()
 
-    st.markdown("### 1. ICP 분석 데이터 확인 및 수정 (단위: mg/L)")
-    icp_col1, icp_col2 = st.columns(2)
+    # 3개 컬럼으로 액체 2종(mg/L) + 고체 1종(wt%) 입력
+    st.markdown("### 1. 액체(mg/L) 및 고체(wt%) 분석 데이터 확인/수정")
+    icp_col1, icp_col2, icp_col3 = st.columns(3)
 
     with icp_col1:
-        st.markdown(f"#### 🔹 1차 여액 분석치 (부피: {primary_filtrate_mass/primary_filtrate_sg:.1f} mL)")
-        icp_li_1 = st.number_input("Li 농도 (mg/L) - 1차 여액", value=float(st.session_state["icp_li_1"]), step=50.0, format="%.1f", key="icp_li_1")
-        icp_ca_1 = st.number_input("Ca 농도 (mg/L) - 1차 여액", value=float(st.session_state["icp_ca_1"]), step=5.0, format="%.1f", key="icp_ca_1")
-        icp_na_1 = st.number_input("Na 농도 (mg/L) - 1차 여액", value=float(st.session_state["icp_na_1"]), step=1.0, format="%.1f", key="icp_na_1")
-        icp_si_1 = st.number_input("Si 농도 (mg/L) - 1차 여액", value=float(st.session_state["icp_si_1"]), step=0.5, format="%.1f", key="icp_si_1")
-        icp_mg_1 = st.number_input("Mg 농도 (mg/L) - 1차 여액", value=float(st.session_state["icp_mg_1"]), step=0.1, format="%.1f", key="icp_mg_1")
-        icp_k_1  = st.number_input("K 농도 (mg/L) - 1차 여액", value=float(st.session_state["icp_k_1"]), step=1.0, format="%.1f", key="icp_k_1")
+        st.markdown(f"#### 🔹 1차 여액 (부피: {primary_filtrate_mass/primary_filtrate_sg:.1f} mL)")
+        icp_li_1 = st.number_input("Li 농도 (mg/L) - 1차", value=float(st.session_state["icp_li_1"]), step=50.0, format="%.1f", key="icp_li_1")
+        icp_ca_1 = st.number_input("Ca 농도 (mg/L) - 1차", value=float(st.session_state["icp_ca_1"]), step=5.0, format="%.1f", key="icp_ca_1")
+        icp_na_1 = st.number_input("Na 농도 (mg/L) - 1차", value=float(st.session_state["icp_na_1"]), step=1.0, format="%.1f", key="icp_na_1")
+        icp_si_1 = st.number_input("Si 농도 (mg/L) - 1차", value=float(st.session_state["icp_si_1"]), step=0.5, format="%.1f", key="icp_si_1")
+        icp_mg_1 = st.number_input("Mg 농도 (mg/L) - 1차", value=float(st.session_state["icp_mg_1"]), step=0.1, format="%.1f", key="icp_mg_1")
+        icp_k_1  = st.number_input("K 농도 (mg/L) - 1차", value=float(st.session_state["icp_k_1"]), step=1.0, format="%.1f", key="icp_k_1")
 
     with icp_col2:
-        st.markdown(f"#### 🔹 수세액 분석치 (부피: {wash_sol_mass/wash_sol_sg:.1f} mL)")
-        icp_li_w = st.number_input("Li 농도 (mg/L) - 수세액", value=float(st.session_state["icp_li_w"]), step=50.0, format="%.1f", key="icp_li_w")
-        icp_ca_w = st.number_input("Ca 농도 (mg/L) - 수세액", value=float(st.session_state["icp_ca_w"]), step=5.0, format="%.1f", key="icp_ca_w")
-        icp_na_w = st.number_input("Na 농도 (mg/L) - 수세액", value=float(st.session_state["icp_na_w"]), step=1.0, format="%.1f", key="icp_na_w")
-        icp_si_w = st.number_input("Si 농도 (mg/L) - 수세액", value=float(st.session_state["icp_si_w"]), step=0.5, format="%.1f", key="icp_si_w")
-        icp_mg_w = st.number_input("Mg 농도 (mg/L) - 수세액", value=float(st.session_state["icp_mg_w"]), step=0.1, format="%.1f", key="icp_mg_w")
-        icp_k_w  = st.number_input("K 농도 (mg/L) - 수세액", value=float(st.session_state["icp_k_w"]), step=1.0, format="%.1f", key="icp_k_w")
+        st.markdown(f"#### 🔹 수세액 (부피: {wash_sol_mass/wash_sol_sg:.1f} mL)")
+        icp_li_w = st.number_input("Li 농도 (mg/L) - 수세", value=float(st.session_state["icp_li_w"]), step=50.0, format="%.1f", key="icp_li_w")
+        icp_ca_w = st.number_input("Ca 농도 (mg/L) - 수세", value=float(st.session_state["icp_ca_w"]), step=5.0, format="%.1f", key="icp_ca_w")
+        icp_na_w = st.number_input("Na 농도 (mg/L) - 수세", value=float(st.session_state["icp_na_w"]), step=1.0, format="%.1f", key="icp_na_w")
+        icp_si_w = st.number_input("Si 농도 (mg/L) - 수세", value=float(st.session_state["icp_si_w"]), step=0.5, format="%.1f", key="icp_si_w")
+        icp_mg_w = st.number_input("Mg 농도 (mg/L) - 수세", value=float(st.session_state["icp_mg_w"]), step=0.1, format="%.1f", key="icp_mg_w")
+        icp_k_w  = st.number_input("K 농도 (mg/L) - 수세", value=float(st.session_state["icp_k_w"]), step=1.0, format="%.1f", key="icp_k_w")
+
+    with icp_col3:
+        st.markdown(f"#### 🔹 건조 케이크 (총 고형분: {est_total_dry_solids:.1f} g)")
+        solid_li_wt = st.number_input("Li 함량 (wt%) - 케이크", value=float(st.session_state["solid_li_wt"]), step=0.01, format="%.3f", key="solid_li_wt")
+        solid_ca_wt = st.number_input("Ca 함량 (wt%) - 케이크", value=float(st.session_state["solid_ca_wt"]), step=0.5, format="%.2f", key="solid_ca_wt")
+        solid_na_wt = st.number_input("Na 함량 (wt%) - 케이크", value=float(st.session_state["solid_na_wt"]), step=0.005, format="%.3f", key="solid_na_wt")
+        solid_si_wt = st.number_input("Si 함량 (wt%) - 케이크", value=float(st.session_state["solid_si_wt"]), step=0.005, format="%.3f", key="solid_si_wt")
+        solid_mg_wt = st.number_input("Mg 함량 (wt%) - 케이크", value=float(st.session_state["solid_mg_wt"]), step=0.001, format="%.3f", key="solid_mg_wt")
+        solid_k_wt  = st.number_input("K 함량 (wt%) - 케이크", value=float(st.session_state["solid_k_wt"]), step=0.001, format="%.3f", key="solid_k_wt")
 
     st.divider()
 
-    st.markdown("### 2. 성분별 질량 및 회수율 계산 결과")
+    # [2] 하단 질량 및 전체 원소 수지 연산
+    st.markdown("### 2. 액체 & 고체 통합 원소 물질수지(Elemental M/B) 결과")
 
     v1_L = (primary_filtrate_mass / primary_filtrate_sg) / 1000.0
     vw_L = (wash_sol_mass / wash_sol_sg) / 1000.0
-    li_in_total_g = n_li2co3 * 2.0 * MW_LI
+    dry_cake_g = est_total_dry_solids
 
     elements = ["Li", "Ca", "Na", "Si", "Mg", "K"]
     conc_1 = [icp_li_1, icp_ca_1, icp_na_1, icp_si_1, icp_mg_1, icp_k_1]
     conc_w = [icp_li_w, icp_ca_w, icp_na_w, icp_si_w, icp_mg_w, icp_k_w]
+    wt_solid = [solid_li_wt, solid_ca_wt, solid_na_wt, solid_si_wt, solid_mg_wt, solid_k_wt]
 
+    # 각 스트림별 질량 (g)
     mass_1_g = [c * v1_L / 1000.0 for c in conc_1]
     mass_w_g = [c * vw_L / 1000.0 for c in conc_w]
-    mass_total_g = [m1 + mw for m1, mw in zip(mass_1_g, mass_w_g)]
+    mass_s_g = [dry_cake_g * (w / 100.0) for w in wt_solid]
+    mass_total_out_g = [m1 + mw + ms for m1, mw, ms in zip(mass_1_g, mass_w_g, mass_s_g)]
 
+    # 투입 원소 기준량
+    li_in_total_g = n_li2co3 * 2.0 * MW_LI
+    ca_in_total_g = n_cao * 1.0 * MW_CA
+
+    # 회수율 및 분배율 계산
     li_rec_1_pct = (mass_1_g[0] / li_in_total_g) * 100.0 if li_in_total_g > 0 else 0.0
     li_rec_w_pct = (mass_w_g[0] / li_in_total_g) * 100.0 if li_in_total_g > 0 else 0.0
-    total_li_rec_pct = li_rec_1_pct + li_rec_w_pct
-    li_loss_pct = max(0.0, 100.0 - total_li_rec_pct)
+    total_li_solution_rec_pct = li_rec_1_pct + li_rec_w_pct
+    li_cake_loss_pct = (mass_s_g[0] / li_in_total_g) * 100.0 if li_in_total_g > 0 else 0.0
+    total_li_closure_pct = total_li_solution_rec_pct + li_cake_loss_pct
     lioh_equiv_g_l = icp_li_1 * (MW_LIOH / MW_LI) / 1000.0
 
     current_active_run = int(st.session_state["run_no"])
 
-    rc1, rc2, rc3, rc4 = st.columns(4)
-    rc1.metric(f"🎯 총 Li 회수율 (Run {current_active_run})", f"{total_li_rec_pct:.2f} %", f"총 회수: {mass_total_g[0]:.2f}g / 투입: {li_in_total_g:.2f}g")
-    rc2.metric("1차 여액 회수율", f"{li_rec_1_pct:.2f} %", f"회수 질량: {mass_1_g[0]:.2f}g")
-    rc3.metric("수세액 회수율", f"{li_rec_w_pct:.2f} %", f"회수 질량: {mass_w_g[0]:.2f}g")
-    rc4.metric("케이크 잔류/손실률", f"{li_loss_pct:.2f} %", f"미회수: {li_in_total_g - mass_total_g[0]:.2f}g", delta_color="inverse")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(f"🎯 총 Li 용액 회수율", f"{total_li_solution_rec_pct:.2f} %", f"1차: {li_rec_1_pct:.1f}% + 수세: {li_rec_w_pct:.1f}%")
+    m2.metric("🧱 고체 케이크 Li 잔류/손실", f"{li_cake_loss_pct:.2f} %", f"케이크 고정: {mass_s_g[0]:.2f}g", delta_color="inverse")
+    m3.metric("📊 총 Li 원소 닫힘율 (Closure)", f"{total_li_closure_pct:.2f} %", f"총 산출: {mass_total_out_g[0]:.2f}g / 투입: {li_in_total_g:.2f}g")
+    m4.metric("1차 여액 LiOH 농도", f"{lioh_equiv_g_l:.2f} g/L", f"Li: {icp_li_1:,.1f} mg/L")
 
-    df_icp_summary = pd.DataFrame({
+    df_integrated_summary = pd.DataFrame({
         "원소 (Element)": elements,
-        "1차 여액 농도 (mg/L)": conc_1,
-        "1차 여액 회수량 (g)": [round(x, 4) for x in mass_1_g],
-        "수세액 농도 (mg/L)": conc_w,
-        "수세액 회수량 (g)": [round(x, 4) for x in mass_w_g],
-        "총 용출 질량 (g)": [round(x, 4) for x in mass_total_g],
-        "Li 대비 불순물 비율 (wt ppm)": [
-            round((mt / mass_total_g[0]) * 1e6, 1) if el != "Li" and mass_total_g[0] > 0 else "-" 
-            for el, mt in zip(elements, mass_total_g)
+        "1차 여액 (g)": [round(x, 4) for x in mass_1_g],
+        "수세액 (g)": [round(x, 4) for x in mass_w_g],
+        "건조 케이크 (g)": [round(x, 4) for x in mass_s_g],
+        "케이크 함량 (wt%)": [f"{w:.3f} %" for w in wt_solid],
+        "총 산출량 (g)": [round(x, 4) for x in mass_total_out_g],
+        "용액 회수 분배율 (%)": [
+            f"{((m1 + mw) / mt * 100):.1f} %" if mt > 0 else "-" 
+            for m1, mw, mt in zip(mass_1_g, mass_w_g, mass_total_out_g)
+        ],
+        "고체 잔류 분배율 (%)": [
+            f"{(ms / mt * 100):.1f} %" if mt > 0 else "-" 
+            for ms, mt in zip(mass_s_g, mass_total_out_g)
         ]
     })
 
-    st.markdown("##### 📋 다성분(Li, Ca, Na, Si, Mg, K) 분석 및 불순물 비율 요약표")
+    st.markdown("##### 📋 액체(여액/수세액) 및 고체(케이크) 통합 원소 분배표")
     st.dataframe(
-        df_icp_summary.style.format({
-            "1차 여액 농도 (mg/L)": "{:,.1f}", "1차 여액 회수량 (g)": "{:.4f}",
-            "수세액 농도 (mg/L)": "{:,.1f}", "수세액 회수량 (g)": "{:.4f}",
-            "총 용출 질량 (g)": "{:.4f}"
+        df_integrated_summary.style.format({
+            "1차 여액 (g)": "{:.4f}",
+            "수세액 (g)": "{:.4f}",
+            "건조 케이크 (g)": "{:.4f}",
+            "총 산출량 (g)": "{:.4f}"
         }),
         use_container_width=True
     )
@@ -670,7 +688,7 @@ with main_tab2:
     st.markdown("---")
     col_sv1, col_sv2 = st.columns([2, 1])
     with col_sv1:
-        save_clicked = st.button(f"💾 Run {current_active_run} 분석 결과를 트렌드 DB에 저장 (및 리포트 자동 발송)", type="primary", use_container_width=True)
+        save_clicked = st.button(f"💾 Run {current_active_run} 통합 분석 결과를 트렌드 DB에 저장 (및 리포트 발송)", type="primary", use_container_width=True)
     with col_sv2:
         st.session_state.auto_email_on_save = st.checkbox("저장 시 메일 자동 발송 켜기", value=st.session_state.auto_email_on_save)
 
@@ -678,7 +696,7 @@ with main_tab2:
         new_row = {
             "회차 (Run)": int(current_active_run),
             "구분": "실측치 (Actual)",
-            "Li 회수율 (%)": round(total_li_rec_pct, 2), 
+            "Li 회수율 (%)": round(total_li_solution_rec_pct, 2), 
             "1차여액 Li농도 (mg/L)": round(icp_li_1, 1),
             "1차여액 LiOH농도 (g/L)": round(lioh_equiv_g_l, 2),
             "M/B 닫힘율 (%)": round(mass_closure, 2), 
@@ -688,19 +706,19 @@ with main_tab2:
         }
         st.session_state.history = st.session_state.history[st.session_state.history["회차 (Run)"] != current_active_run]
         st.session_state.history = pd.concat([st.session_state.history, pd.DataFrame([new_row])]).sort_values("회차 (Run)").reset_index(drop=True)
-        st.success(f"✅ Run {current_active_run} ICP 분석 데이터가 트렌드 DB에 영구 등록되었습니다!")
+        st.success(f"✅ Run {current_active_run} 액체/고체 통합 분석 데이터가 트렌드 DB에 영구 등록되었습니다!")
 
         if st.session_state.auto_email_on_save:
             ok, msg_res = send_email_report(
                 run_num=current_active_run, mass_cls=mass_closure, loss_m=loss_mass,
-                li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
-                lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
-                si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
-                purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
-                df_icp_tbl=df_icp_summary, df_sim_tbl=None, is_auto=True
+                li_rec_tot=total_li_solution_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
+                li_cake_loss=li_cake_loss_pct, lioh_conc=lioh_equiv_g_l, li_1=icp_li_1,
+                ca_1=icp_ca_1, na_1=icp_na_1, si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1,
+                loi=loi_pct, purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+                df_icp_tbl=df_integrated_summary, df_sim_tbl=None, is_auto=True
             )
             if ok:
-                st.toast(f"📧 리포트 메일 자동 발송 완료!", icon="🎉")
+                st.toast(f"📧 통합 리포트 메일 자동 발송 완료!", icon="🎉")
                 st.success(f"📧 **[자동 발송 성공]** {msg_res}")
             else:
                 st.warning(f"⚠️ **[자동 발송 미완료]** {msg_res}")
@@ -725,7 +743,7 @@ with main_tab3:
 
     sim_rows = []
     base_li_conc = icp_li_1 if 'icp_li_1' in locals() else 10500.0
-    base_recovery = total_li_rec_pct if 'total_li_rec_pct' in locals() and total_li_rec_pct > 0 else 95.80
+    base_recovery = total_li_solution_rec_pct if 'total_li_solution_rec_pct' in locals() and total_li_solution_rec_pct > 0 else 95.80
 
     temp_factor = 1.0 + (sim_temp - 80.0) * 0.004
     time_factor = 1.0 + (sim_time - 2.0) * 0.03
@@ -918,13 +936,13 @@ with main_tab4:
 # --------------------------------------------------------------------------
 with main_tab5:
     st.header("💬 AI 공정 엔지니어와 대화하기")
-    st.caption("현재 실험 수치, ICP 분석 결과, $n$회차 시뮬레이션을 바탕으로 실시간 질의응답을 진행합니다.")
+    st.caption("현재 실험 수치, 액체/고체 분석 결과, $n$회차 시뮬레이션을 바탕으로 실시간 질의응답을 진행합니다.")
 
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    if user_prompt := st.chat_input("질문을 입력하세요 (예: Ca 농도가 120ppm이면 제품 순도에 영향이 커?)"):
+    if user_prompt := st.chat_input("질문을 입력하세요 (예: 케이크 Li 잔류량이 0.38wt%면 회수율에 얼마나 영향 줘?)"):
         st.session_state.chat_messages.append({"role": "user", "content": user_prompt})
         with st.chat_message("user"):
             st.markdown(user_prompt)
@@ -936,7 +954,9 @@ with main_tab5:
                 context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
 현재 공정 데이터:
 - 실험 회차: Run {st.session_state['run_no']}
-- Li 회수율: {total_li_rec_pct:.2f}% (1차 여액 {li_rec_1_pct:.1f}% + 수세액 {li_rec_w_pct:.1f}%)
+- 총 Li 용액 회수율: {total_li_solution_rec_pct:.2f}% (1차 {li_rec_1_pct:.1f}%, 수세 {li_rec_w_pct:.1f}%)
+- 케이크 Li 손실률: {li_cake_loss_pct:.2f}% (고체 wt%: {solid_li_wt:.3f}%)
+- 총 Li 원소 닫힘율: {total_li_closure_pct:.2f}%
 - 1차 여액 LiOH 농도: {lioh_equiv_g_l:.2f} g/L, Ca: {icp_ca_1} mg/L, Na: {icp_na_1} mg/L
 - LOI: {loi_pct:.2f}%, M/B 정합성: {mass_closure:.2f}%
 
@@ -945,9 +965,9 @@ with main_tab5:
                 resp = chat_model.generate_content(context_prompt)
                 ai_reply = resp.text
             except Exception as e:
-                ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. (API 호출 실패: {e})"
+                ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**, 케이크 Li 잔류 손실은 **{li_cake_loss_pct:.2f}%**입니다. (API 호출 실패: {e})"
         else:
-            ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**입니다. 배터리급 수산화리튬(LH) 스펙 대비 높으므로, 증발 농축/결정화 전에 CO₂ 가스를 불어넣어 침전 분리하는 **2차 탄산화(Carbonation) 탈칼슘 공정**을 거치는 것을 권장합니다."
+            ai_reply = f"현재 1차 여액 내 Ca 농도는 **{icp_ca_1} mg/L**, 케이크 Li 잔류 손실은 **{li_cake_loss_pct:.2f}%**입니다."
 
         st.session_state.chat_messages.append({"role": "assistant", "content": ai_reply})
         with st.chat_message("assistant"):
@@ -1047,11 +1067,11 @@ with main_tab6:
         if st.button(f"📨 현재 회차 (Run {st.session_state['run_no']}) 리포트 수동 발송", type="primary", use_container_width=True):
             ok, msg_res = send_email_report(
                 run_num=int(st.session_state["run_no"]), mass_cls=mass_closure, loss_m=loss_mass,
-                li_rec_tot=total_li_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
-                lioh_conc=lioh_equiv_g_l, li_1=icp_li_1, ca_1=icp_ca_1, na_1=icp_na_1,
-                si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1, loi=loi_pct,
-                purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
-                df_icp_tbl=df_icp_summary, df_sim_tbl=df_simulation, is_auto=False
+                li_rec_tot=total_li_solution_rec_pct, li_rec_1=li_rec_1_pct, li_rec_w=li_rec_w_pct,
+                li_cake_loss=li_cake_loss_pct, lioh_conc=lioh_equiv_g_l, li_1=icp_li_1,
+                ca_1=icp_ca_1, na_1=icp_na_1, si_1=icp_si_1, mg_1=icp_mg_1, k_1=icp_k_1,
+                loi=loi_pct, purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
+                df_icp_tbl=df_integrated_summary, df_sim_tbl=df_simulation, is_auto=False
             )
             if ok:
                 st.success(f"🎉 {msg_res}")
