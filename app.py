@@ -137,7 +137,7 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] 공통 도우미 및 모델 탐색 (오류 완벽 해결)
+# [2] 최신 Google Gemini 모델 동적 탐색 및 공통 도우미
 # --------------------------------------------------------------------------
 def clean_float(val):
     if val is None:
@@ -167,25 +167,23 @@ def get_available_gemini_models(api_key):
     genai.configure(api_key=api_key)
     try:
         available = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-        priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "flash"]
+        # 서비스 종료된 구버전 모델(2.5-flash 등) 제외
+        deprecated = ["gemini-2.5-flash", "gemini-1.0-pro", "gemini-pro-vision"]
+        valid_available = [m for m in available if not any(d in m.lower() for d in deprecated)]
+        
+        # Google 공식 권장 모델 우선순위 정렬
+        priority = ["gemini-3.6-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "flash"]
         sorted_m = []
         for p in priority:
-            for m in available:
+            for m in valid_available:
                 if p in m.lower() and m not in sorted_m:
                     sorted_m.append(m)
-        for m in available:
+        for m in valid_available:
             if m not in sorted_m:
                 sorted_m.append(m)
-        return sorted_m
+        return sorted_m if sorted_m else ["models/gemini-3.6-flash", "models/gemini-2.0-flash"]
     except Exception:
-        return ["gemini-1.5-flash", "gemini-2.0-flash"]
-
-def get_best_available_model(api_key):
-    """DoE 및 대화창 전용 모델 인스턴스 반환 함수"""
-    models = get_available_gemini_models(api_key)
-    if models:
-        return genai.GenerativeModel(models[0])
-    return genai.GenerativeModel("gemini-1.5-flash")
+        return ["models/gemini-3.6-flash", "models/gemini-2.0-flash"]
 
 # --------------------------------------------------------------------------
 # [3] 1번 탭 전용 Vision OCR 파서 (공정 수치 전담)
@@ -458,12 +456,12 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("🔑 Google Gemini AI 설정")
-    st.caption("1,500회/일 대용량 무료 모델로 사진 인식 및 DoE 레시피를 생성합니다.")
+    st.caption("최신 Google Gemini 3.6 Flash 모델로 사진 인식 및 DoE 레시피를 생성합니다.")
     new_key_input = st.text_input(
         "Google Gemini API Key", 
         value=st.session_state.gemini_api_key, 
         type="password",
-        help="aistudio.google.com에서 새 프로젝트(New Project)로 발급받은 AIzaSy... 키를 입력하세요."
+        help="aistudio.google.com에서 발급받은 AIzaSy... 키를 입력하세요."
     )
     if new_key_input != st.session_state.gemini_api_key:
         st.session_state.gemini_api_key = new_key_input
@@ -1136,16 +1134,27 @@ with main_tab4:
   "precautions": "실험 진행 시 핵심 주의사항 (2~3줄)"
 }}
 """
-                    model = get_best_available_model(api_key)
-                    resp = model.generate_content(doe_prompt, request_options={"timeout": 15})
+                    models = get_available_gemini_models(api_key)
+                    doe_result = None
+                    last_doe_err = None
 
-                    if resp and resp.text:
-                        clean_json_str = resp.text.replace("```json", "").replace("```", "").strip()
-                        doe_result = json.loads(clean_json_str)
+                    for m_name in models:
+                        try:
+                            model = genai.GenerativeModel(m_name)
+                            resp = model.generate_content(doe_prompt, request_options={"timeout": 15})
+                            if resp and resp.text:
+                                clean_json_str = resp.text.replace("```json", "").replace("```", "").strip()
+                                doe_result = json.loads(clean_json_str)
+                                break
+                        except Exception as ex:
+                            last_doe_err = ex
+                            continue
+
+                    if doe_result:
                         st.session_state.latest_doe = doe_result
                         st.success("🎉 Gemini AI 자율 DoE 레시피가 성공적으로 생성되었습니다!")
                     else:
-                        st.error("❌ DoE 생성 실패: AI 모델 응답을 가져오지 못했습니다.")
+                        st.error(f"❌ DoE 생성 실패: {last_doe_err}")
                 except Exception as e:
                     st.error(f"❌ DoE 생성 실패: {e}")
 
@@ -1210,7 +1219,7 @@ with main_tab5:
         api_key = st.session_state.gemini_api_key.strip()
         if api_key:
             try:
-                chat_model = get_best_available_model(api_key)
+                models = get_available_gemini_models(api_key)
                 context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
 현재 공정 데이터:
 - 실험 회차: Run {st.session_state.run_no}
@@ -1224,10 +1233,18 @@ with main_tab5:
 
 질문: {user_prompt}
 배터리 소재 품질 및 양론적 관점에서 친절하고 명확하게 답변해 주세요."""
-                resp = chat_model.generate_content(context_prompt, request_options={"timeout": 15})
-                if resp and resp.text:
-                    ai_reply = resp.text
-                else:
+                ai_reply = None
+                for m_name in models:
+                    try:
+                        chat_model = genai.GenerativeModel(m_name)
+                        resp = chat_model.generate_content(context_prompt, request_options={"timeout": 15})
+                        if resp and resp.text:
+                            ai_reply = resp.text
+                            break
+                    except Exception:
+                        continue
+
+                if not ai_reply:
                     ai_reply = f"현재 수세수 투입량은 **{st.session_state.wash_water_in:.1f} g**, 수세액 회수율 기여도는 **{li_rec_w_pct:.2f}%**입니다."
             except Exception as e:
                 ai_reply = f"현재 수세수 투입량은 **{st.session_state.wash_water_in:.1f} g**, 수세액 회수율 기여도는 **{li_rec_w_pct:.2f}%**입니다. (API 오류: {e})"
