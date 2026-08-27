@@ -32,7 +32,7 @@ AGENT_TITLE = "LC-LH전환반응 M/B자동화 및 거동예측 Agent tool"
 st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
 
 # --------------------------------------------------------------------------
-# [1] 기본 세션 상태 초기화 (표준 단일 세션 바인딩)
+# [1] 기본 세션 상태 초기화 (표준 1:1 직통 세션 바인딩)
 # --------------------------------------------------------------------------
 DEFAULT_DATA = {
     "run_no": 1,
@@ -136,7 +136,7 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] 1,500회/일 대용량 무료 모델 전용 고속 Vision OCR 엔진
+# [2] 동적 모델 자동 탐색 & 하이브리드 Vision OCR 엔진 (미인식 항목 기본값 유지)
 # --------------------------------------------------------------------------
 def clean_float(val):
     if val is None:
@@ -249,6 +249,21 @@ def optimize_image_for_vision(image_bytes):
         img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
     return img
 
+def get_best_available_model(api_key):
+    genai.configure(api_key=api_key)
+    try:
+        available = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+        preferred = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "flash"]
+        for p in preferred:
+            for m in available:
+                if p in m.lower():
+                    return genai.GenerativeModel(m)
+        if available:
+            return genai.GenerativeModel(available[0])
+    except Exception:
+        pass
+    return genai.GenerativeModel("gemini-1.5-flash")
+
 def parse_image_with_vision(image_bytes, doc_type="lab_note"):
     api_key = st.session_state.gemini_api_key.strip()
     if not api_key:
@@ -258,50 +273,75 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
         genai.configure(api_key=api_key)
         img = optimize_image_for_vision(image_bytes)
 
+        available_models = []
+        try:
+            for m in genai.list_models():
+                if "generateContent" in m.supported_generation_methods:
+                    available_models.append(m.name)
+        except Exception as list_err:
+            return None, "", f"Google API Key 인증 오류: {list_err}. 새 프로젝트에서 발급받은 키인지 확인해주세요."
+
+        if not available_models:
+            return None, "", "현재 API Key로 사용 가능한 모델이 없습니다. 새 프로젝트에서 API Key를 재발급받아주세요."
+
+        # Flash 계열 정식 무료 모델 우선 순차 호출
+        priority_kws = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "flash", "gemini"]
+        sorted_models = []
+        for kw in priority_kws:
+            for m in available_models:
+                if kw in m.lower() and m not in sorted_models:
+                    sorted_models.append(m)
+        for m in available_models:
+            if m not in sorted_models:
+                sorted_models.append(m)
+
         if doc_type == "lab_note":
             prompt = """이 이미지는 탄산리튬(LC) 가성화 및 Ca-Loop 습식 제련 공정의 실험 일지(수기 또는 인쇄물)입니다.
-이미지에 적힌 모든 항목명과 숫자를 읽고, 아래 JSON 포맷으로 키-값을 정확히 매핑하여 순수 숫자만 넣어 반환하세요.
+이미지에 적힌 항목명과 숫자를 정밀하게 읽고, 아래 JSON 포맷으로 키-값을 매핑하여 순수 숫자만 넣어 반환하세요.
+
+[필수 규칙]
+1. 이미지에 적혀있지 않거나 판독할 수 없는 항목은 절대로 0으로 채우지 말고 반드시 null로 표기하세요.
+2. 오직 이미지에 명시적으로 적힌 숫자만 추출하세요.
 
 {
-  "run_no": number,
-  "li2co3_mass": number,
-  "li2co3_water": number,
-  "fresh_cao_mass": number,
-  "recycled_cao_mass": number,
-  "slurry_water": number,
-  "temp_c": number,
-  "time_h": number,
-  "primary_filtrate_mass": number,
-  "primary_filtrate_sg": number,
-  "primary_filtrate_ph": number,
-  "wet_cake_mass": number,
-  "sample_wet": number,
-  "sample_dry": number,
-  "wash_water_in": number,
-  "wash_sol_mass": number,
-  "wash_sol_sg": number,
-  "wash_sol_ph": number,
-  "test_dry_cake": number,
-  "calcined_cao": number,
-  "calc_temp": number,
-  "calc_time": number
+  "run_no": number or null,
+  "li2co3_mass": number or null,
+  "li2co3_water": number or null,
+  "fresh_cao_mass": number or null,
+  "recycled_cao_mass": number or null,
+  "slurry_water": number or null,
+  "temp_c": number or null,
+  "time_h": number or null,
+  "primary_filtrate_mass": number or null,
+  "primary_filtrate_sg": number or null,
+  "primary_filtrate_ph": number or null,
+  "wet_cake_mass": number or null,
+  "sample_wet": number or null,
+  "sample_dry": number or null,
+  "wash_water_in": number or null,
+  "wash_sol_mass": number or null,
+  "wash_sol_sg": number or null,
+  "wash_sol_ph": number or null,
+  "test_dry_cake": number or null,
+  "calcined_cao": number or null,
+  "calc_temp": number or null,
+  "calc_time": number or null
 }"""
         else:
-            prompt = """이 이미지는 LiOH 용액, 수세액 및 CaCO3 고체 성적서입니다. 각 원소 수치를 추출하여 JSON으로 반환하세요.
+            prompt = """이 이미지는 LiOH 용액, 수세액 및 CaCO3 고체 성적서입니다. 각 원소 수치를 추출하여 JSON으로 반환하세요. 적혀있지 않은 항목은 반드시 null로 하세요.
 {
-  "icp_li_1": number, "icp_ca_1": number, "icp_na_1": number, "icp_si_1": number, "icp_mg_1": number, "icp_k_1": number,
-  "icp_li_w": number, "icp_ca_w": number, "icp_na_w": number, "icp_si_w": number, "icp_mg_w": number, "icp_k_w": number,
-  "solid_li_wt": number, "solid_ca_wt": number, "solid_na_wt": number, "solid_si_wt": number, "solid_mg_wt": number, "solid_k_wt": number
+  "icp_li_1": number or null, "icp_ca_1": number or null, "icp_na_1": number or null, "icp_si_1": number or null, "icp_mg_1": number or null, "icp_k_1": number or null,
+  "icp_li_w": number or null, "icp_ca_w": number or null, "icp_na_w": number or null, "icp_si_w": number or null, "icp_mg_w": number or null, "icp_k_w": number or null,
+  "solid_li_wt": number or null, "solid_ca_wt": number or null, "solid_na_wt": number or null, "solid_si_wt": number or null, "solid_mg_wt": number or null, "solid_k_wt": number or null
 }"""
 
-        models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
         raw_text = None
         last_err = None
 
-        for m_name in models_to_try:
+        for m_name in sorted_models:
             try:
                 model = genai.GenerativeModel(m_name)
-                resp = model.generate_content([img, prompt], request_options={"timeout": 12})
+                resp = model.generate_content([img, prompt], request_options={"timeout": 15})
                 if resp and resp.text:
                     raw_text = resp.text
                     break
@@ -310,7 +350,7 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
                 continue
 
         if not raw_text:
-            return None, "", f"AI 호출 오류 (새 프로젝트에서 API Key를 재발급받아 입력해주세요): {last_err}"
+            return None, "", f"AI 모델 호출 오류: {last_err}"
 
         parsed_dict = {}
         try:
@@ -477,8 +517,9 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
 with main_tab1:
     with st.expander("📷 [AI Vision] 수기/인쇄 실험 일지 사진으로 자동 입력", expanded=True):
         # ⚡ 최상단 1초 즉시 적용 버튼
-        st.info("💡 **[1초 즉시 적용 기능]** 구글 API 쿼터 소진과 무관하게, 올려주신 손글씨 일지 데이터(88.78g 등 10개 수치)를 0.1초 만에 화면에 채우려면 아래 버튼을 누르세요.")
+        st.info("💡 **[1초 즉시 적용 기능]** 손글씨 일지 데이터(88.78g 등 10개 수치)를 즉시 입력창에 채우고, 사진에 없는 나머지 항목은 기본값을 유지하려면 아래 버튼을 누르세요.")
         if st.button("⚡ 올려주신 일지 데이터(88.78g 등) 1초 즉시 적용", type="secondary", use_container_width=True):
+            # 사진에 적혀있는 10개 항목만 정확히 업데이트 (사진에 없는 항목은 기존 기본값 100% 유지)
             st.session_state.run_no = 1
             st.session_state.li2co3_mass = 88.78
             st.session_state.li2co3_water = 1003.78
@@ -534,6 +575,7 @@ with main_tab1:
                                 "test_dry_cake": "소성 투입 CaCO₃(g)", "calcined_cao": "소성 후 CaO(g)", "calc_temp": "소성 온도(℃)", "calc_time": "소성 시간(h)"
                             }
 
+                            # 미인식 항목은 0으로 바꾸지 않고 기존 기본값 그대로 보존
                             for k, val in parsed_data.items():
                                 if val is not None and k in DEFAULT_DATA:
                                     old_v = st.session_state[k]
@@ -557,7 +599,7 @@ with main_tab1:
 
     # 판독 결과 검증창
     if "last_applied_report" in st.session_state and st.session_state.last_applied_report:
-        st.success(f"🎉 판독 완료! 총 **{len(st.session_state.last_applied_report)}개** 수치가 아래 입력창에 즉시 반영되었습니다.")
+        st.success(f"🎉 판독 완료! 총 **{len(st.session_state.last_applied_report)}개** 수치가 아래 입력창에 즉시 반영되었습니다. (사진에 없는 항목은 기본값 유지)")
         with st.expander("📋 [검증] 변경된 수치 비교표 및 AI 판독 원문", expanded=False):
             st.dataframe(pd.DataFrame(st.session_state.last_applied_report), use_container_width=True)
             if "last_raw_ai_text" in st.session_state:
@@ -696,7 +738,7 @@ with main_tab2:
                             for k, val in parsed_icp.items():
                                 if val is not None and k in DEFAULT_DATA:
                                     st.session_state[k] = float(val)
-                            st.success("🎉 LiOH 용액(mg/L) 및 CaCO₃(wt%) 성분값 판독 및 자동 반영 완료!")
+                            st.success("🎉 LiOH 용액(mg/L) 및 CaCO₃(wt%) 성분값 판독 및 자동 반영 완료! (미인식 항목 기본값 유지)")
                             st.rerun()
 
     with st.container():
@@ -1125,8 +1167,7 @@ with main_tab4:
   "precautions": "실험 진행 시 핵심 주의사항 (2~3줄)"
 }}
 """
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel("gemini-1.5-flash")
+                    model = get_best_available_model(api_key)
                     resp = model.generate_content(doe_prompt, request_options={"timeout": 15})
 
                     if resp and resp.text:
@@ -1200,8 +1241,7 @@ with main_tab5:
         api_key = st.session_state.gemini_api_key.strip()
         if api_key:
             try:
-                genai.configure(api_key=api_key)
-                chat_model = genai.GenerativeModel("gemini-1.5-flash")
+                chat_model = get_best_available_model(api_key)
                 context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
 현재 공정 데이터:
 - 실험 회차: Run {st.session_state.run_no}
