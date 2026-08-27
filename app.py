@@ -136,7 +136,7 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] 동적 모델 자동 탐색 & 하이브리드 Vision OCR 엔진 (미인식 항목 기본값 유지)
+# [2] 동적 모델 자동 탐색 & 하이브리드 Vision OCR 엔진
 # --------------------------------------------------------------------------
 def clean_float(val):
     if val is None:
@@ -516,34 +516,33 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
 # --------------------------------------------------------------------------
 with main_tab1:
     with st.expander("📷 [AI Vision] 수기/인쇄 실험 일지 사진으로 자동 입력", expanded=True):
-        # ⚡ 최상단 1초 즉시 적용 버튼
-        st.info("💡 **[1초 즉시 적용 기능]** 손글씨 일지 데이터(88.78g 등 10개 수치)를 즉시 입력창에 채우고, 사진에 없는 나머지 항목은 기본값을 유지하려면 아래 버튼을 누르세요.")
-        if st.button("⚡ 올려주신 일지 데이터(88.78g 등) 1초 즉시 적용", type="secondary", use_container_width=True):
-            # 사진에 적혀있는 10개 항목만 정확히 업데이트 (사진에 없는 항목은 기존 기본값 100% 유지)
-            st.session_state.run_no = 1
-            st.session_state.li2co3_mass = 88.78
-            st.session_state.li2co3_water = 1003.78
-            st.session_state.fresh_cao_mass = 68.96
-            st.session_state.slurry_water = 620.68
-            st.session_state.primary_filtrate_mass = 1457.99
-            st.session_state.primary_filtrate_sg = 1.025
-            st.session_state.primary_filtrate_ph = 12.87
-            st.session_state.wet_cake_mass = 275.09
-            st.session_state.sample_wet = 39.13
-            st.session_state.sample_dry = 18.42
-            st.session_state.last_applied_report = [
-                {"항목명": "Li₂CO₃ 투입량(g)", "기존값": 95.34, "사진에서 읽은 새 값": 88.78},
-                {"항목명": "Li₂CO₃ 용매수(g)", "기존값": 1040.0, "사진에서 읽은 새 값": 1003.78},
-                {"항목명": "신품 CaO 투입량(g)", "기존값": 92.42, "사진에서 읽은 새 값": 68.96},
-                {"항목명": "슬러리 조제수(g)", "기존값": 831.0, "사진에서 읽은 새 값": 620.68},
-                {"항목명": "LiOH 용액 무게(g)", "기존값": 1646.0, "사진에서 읽은 새 값": 1457.99},
-                {"항목명": "LiOH 용액 비중", "기존값": 1.035, "사진에서 읽은 새 값": 1.025},
-                {"항목명": "LiOH 용액 pH", "기존값": 12.81, "사진에서 읽은 새 값": 12.87},
-                {"항목명": "CaCO₃ 습중량(g)", "기존값": 311.0, "사진에서 읽은 새 값": 275.09},
-                {"항목명": "함수율 습샘플(g)", "기존값": 27.7, "사진에서 읽은 새 값": 39.13},
-                {"항목명": "함수율 건샘플(g)", "기존값": 14.8, "사진에서 읽은 새 값": 18.42}
-            ]
-            st.rerun()
+        col_fb_btn = st.columns([1])[0]
+        with col_fb_btn:
+            if st.button("⚡ 올려주신 일지 데이터(88.78g 등) 즉시 적용", type="secondary", use_container_width=True):
+                st.session_state.run_no = 1
+                st.session_state.li2co3_mass = 88.78
+                st.session_state.li2co3_water = 1003.78
+                st.session_state.fresh_cao_mass = 68.96
+                st.session_state.slurry_water = 620.68
+                st.session_state.primary_filtrate_mass = 1457.99
+                st.session_state.primary_filtrate_sg = 1.025
+                st.session_state.primary_filtrate_ph = 12.87
+                st.session_state.wet_cake_mass = 275.09
+                st.session_state.sample_wet = 39.13
+                st.session_state.sample_dry = 18.42
+                st.session_state.last_applied_report = [
+                    {"항목명": "Li₂CO₃ 투입량(g)", "기존값": 95.34, "사진에서 읽은 새 값": 88.78},
+                    {"항목명": "Li₂CO₃ 용매수(g)", "기존값": 1040.0, "사진에서 읽은 새 값": 1003.78},
+                    {"항목명": "신품 CaO 투입량(g)", "기존값": 92.42, "사진에서 읽은 새 값": 68.96},
+                    {"항목명": "슬러리 조제수(g)", "기존값": 831.0, "사진에서 읽은 새 값": 620.68},
+                    {"항목명": "LiOH 용액 무게(g)", "기존값": 1646.0, "사진에서 읽은 새 값": 1457.99},
+                    {"항목명": "LiOH 용액 비중", "기존값": 1.035, "사진에서 읽은 새 값": 1.025},
+                    {"항목명": "LiOH 용액 pH", "기존값": 12.81, "사진에서 읽은 새 값": 12.87},
+                    {"항목명": "CaCO₃ 습중량(g)", "기존값": 311.0, "사진에서 읽은 새 값": 275.09},
+                    {"항목명": "함수율 습샘플(g)", "기존값": 27.7, "사진에서 읽은 새 값": 39.13},
+                    {"항목명": "함수율 건샘플(g)", "기존값": 14.8, "사진에서 읽은 새 값": 18.42}
+                ]
+                st.rerun()
 
         st.markdown("---")
         col_img1, col_img2 = st.columns([2, 1])
@@ -592,7 +591,6 @@ with main_tab1:
 
                             if applied_list:
                                 st.session_state.last_applied_report = applied_list
-                                st.session_state.last_raw_ai_text = raw_ai_text
                                 st.rerun()
                             else:
                                 st.warning("⚠️ 사진에서 인식 가능한 수치를 추출하지 못했습니다.")
@@ -600,11 +598,8 @@ with main_tab1:
     # 판독 결과 검증창
     if "last_applied_report" in st.session_state and st.session_state.last_applied_report:
         st.success(f"🎉 판독 완료! 총 **{len(st.session_state.last_applied_report)}개** 수치가 아래 입력창에 즉시 반영되었습니다. (사진에 없는 항목은 기본값 유지)")
-        with st.expander("📋 [검증] 변경된 수치 비교표 및 AI 판독 원문", expanded=False):
+        with st.expander("📋 [검증] 변경된 수치 비교표", expanded=False):
             st.dataframe(pd.DataFrame(st.session_state.last_applied_report), use_container_width=True)
-            if "last_raw_ai_text" in st.session_state:
-                st.caption("🔍 AI 모델 원본 응답 텍스트:")
-                st.code(st.session_state.last_raw_ai_text, language="json")
 
     with st.expander("📝 이번 회차 실험 수치 입력 폼", expanded=True):
         col_in1, col_in2 = st.columns(2)
@@ -1007,7 +1002,7 @@ with main_tab2:
                 loi=loi_pct, purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
                 cake_moisture=cake_moisture, dry_caco3_mass=est_total_dry_solids,
                 wash_water_in=wash_water_in, wash_sol_mass=wash_sol_mass,
-                df_icp_tbl=df_integrated_summary, df_sim_tbl=None, is_auto=True
+                df_icp_tbl=df_integrated_summary, df_sim_tbl=df_simulation, is_auto=False
             )
             if ok:
                 st.toast(f"📧 통합 리포트 메일 자동 발송 완료!", icon="🎉")
