@@ -101,12 +101,13 @@ except Exception:
 if "gemini_api_key" not in st.session_state:
     st.session_state.gemini_api_key = secret_key
 
+# 6번 탭 이메일 발송 기본 계정 및 수신자 고정 설정
 if "email_recipients" not in st.session_state:
-    st.session_state.email_recipients = "user@company.com"
+    st.session_state.email_recipients = "jhyunuk@rist.re.kr"
 if "email_sender" not in st.session_state:
-    st.session_state.email_sender = "sender@gmail.com"
+    st.session_state.email_sender = "hyunukjin@gmail.com"
 if "email_password" not in st.session_state:
-    st.session_state.email_password = ""
+    st.session_state.email_password = "khbabmyzwgbwnfam"
 if "smtp_server" not in st.session_state:
     st.session_state.smtp_server = "smtp.gmail.com"
 if "smtp_port" not in st.session_state:
@@ -167,11 +168,9 @@ def get_available_gemini_models(api_key):
     genai.configure(api_key=api_key)
     try:
         available = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-        # 서비스 종료된 구버전 모델(2.5-flash 등) 제외
         deprecated = ["gemini-2.5-flash", "gemini-1.0-pro", "gemini-pro-vision"]
         valid_available = [m for m in available if not any(d in m.lower() for d in deprecated)]
         
-        # Google 공식 권장 모델 우선순위 정렬
         priority = ["gemini-3.6-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "flash"]
         sorted_m = []
         for p in priority:
@@ -184,6 +183,12 @@ def get_available_gemini_models(api_key):
         return sorted_m if sorted_m else ["models/gemini-3.6-flash", "models/gemini-2.0-flash"]
     except Exception:
         return ["models/gemini-3.6-flash", "models/gemini-2.0-flash"]
+
+def get_best_available_model(api_key):
+    models = get_available_gemini_models(api_key)
+    if models:
+        return genai.GenerativeModel(models[0])
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 # --------------------------------------------------------------------------
 # [3] 1번 탭 전용 Vision OCR 파서 (공정 수치 전담)
@@ -1219,7 +1224,7 @@ with main_tab5:
         api_key = st.session_state.gemini_api_key.strip()
         if api_key:
             try:
-                models = get_available_gemini_models(api_key)
+                chat_model = get_best_available_model(api_key)
                 context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
 현재 공정 데이터:
 - 실험 회차: Run {st.session_state.run_no}
@@ -1233,18 +1238,10 @@ with main_tab5:
 
 질문: {user_prompt}
 배터리 소재 품질 및 양론적 관점에서 친절하고 명확하게 답변해 주세요."""
-                ai_reply = None
-                for m_name in models:
-                    try:
-                        chat_model = genai.GenerativeModel(m_name)
-                        resp = chat_model.generate_content(context_prompt, request_options={"timeout": 15})
-                        if resp and resp.text:
-                            ai_reply = resp.text
-                            break
-                    except Exception:
-                        continue
-
-                if not ai_reply:
+                resp = chat_model.generate_content(context_prompt, request_options={"timeout": 15})
+                if resp and resp.text:
+                    ai_reply = resp.text
+                else:
                     ai_reply = f"현재 수세수 투입량은 **{st.session_state.wash_water_in:.1f} g**, 수세액 회수율 기여도는 **{li_rec_w_pct:.2f}%**입니다."
             except Exception as e:
                 ai_reply = f"현재 수세수 투입량은 **{st.session_state.wash_water_in:.1f} g**, 수세액 회수율 기여도는 **{li_rec_w_pct:.2f}%**입니다. (API 오류: {e})"
@@ -1256,7 +1253,7 @@ with main_tab5:
             st.markdown(ai_reply)
 
 # --------------------------------------------------------------------------
-# TAB 6: 📧 리포트 메일 발송 현황 & 연결 테스트
+# TAB 6: 📧 리포트 메일 발송 현황 & 연결 테스트 (기본값 완벽 고정)
 # --------------------------------------------------------------------------
 with main_tab6:
     st.header("📧 리포트 메일 발송 현황 & 계정 설정")
