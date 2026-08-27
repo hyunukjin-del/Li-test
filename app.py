@@ -29,14 +29,6 @@ MW_K = 39.10
 ELEMENT_ORDER = ["Li", "Ca", "Na", "Si", "Mg", "K"]
 AGENT_TITLE = "LC-LH전환반응 M/B자동화 및 거동예측 Agent tool"
 
-# 초고속 Flash 모델 우선순위 리스트 (네트워크 조회 없이 직통 호출)
-FAST_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-pro"
-]
-
 st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
 
 # --------------------------------------------------------------------------
@@ -146,7 +138,7 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] 초고속 이미지 최적화 및 파싱 도우미
+# [2] 동적 모델 자동 탐색 & 이미지 최적화 도우미
 # --------------------------------------------------------------------------
 def clean_float(val):
     if val is None:
@@ -163,7 +155,7 @@ def clean_float(val):
     return None
 
 def optimize_image_ultrafast(image_bytes):
-    """600px 초경량 JPEG 압축으로 전송 시간 0.2초 이내 단축"""
+    """650px 초경량 리사이징으로 전송 시간 0.2초 이내 단축"""
     img = Image.open(io.BytesIO(image_bytes))
     img = ImageOps.exif_transpose(img)
     if img.mode != "RGB":
@@ -173,16 +165,35 @@ def optimize_image_ultrafast(image_bytes):
         img.thumbnail((max_dim, max_dim), Image.Resampling.BILINEAR)
     
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=75, optimize=True)
+    img.save(buf, format="JPEG", quality=80, optimize=True)
     buf.seek(0)
     return Image.open(buf)
 
-def get_best_available_model(api_key):
+def get_active_models(api_key):
+    """사용자 API 키에서 실제 동작하는 정식 모델만 실시간 조회 (404 원천 차단)"""
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel(FAST_MODELS[0])
+    try:
+        available = [m.name.replace("models/", "") for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+        # 20회 제한 및 폐기된 모델 필터링
+        banned = ["3.6", "2.5", "1.0", "vision", "pro"]
+        valid = [m for m in available if not any(b in m.lower() for b in banned)]
+        
+        # 1,500회/일 대용량 Flash 모델 우선 배치
+        preferred = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash-lite"]
+        sorted_m = []
+        for p in preferred:
+            for m in valid:
+                if p in m and m not in sorted_m:
+                    sorted_m.append(m)
+        for m in valid:
+            if m not in sorted_m:
+                sorted_m.append(m)
+        return sorted_m if sorted_m else ["gemini-2.0-flash", "gemini-1.5-flash"]
+    except Exception:
+        return ["gemini-2.0-flash", "gemini-1.5-flash"]
 
 # --------------------------------------------------------------------------
-# [3] 1번 탭 전용 Vision OCR 파서 (초고속 전담)
+# [3] 1번 탭 전용 Vision OCR 파서 (공정 수치 전담)
 # --------------------------------------------------------------------------
 def parse_tab1_experiment_image(image_bytes):
     api_key = st.session_state.gemini_api_key.strip()
@@ -190,8 +201,8 @@ def parse_tab1_experiment_image(image_bytes):
         return None, "사이드바에 Google Gemini API Key를 입력해주세요."
 
     try:
-        genai.configure(api_key=api_key)
         img = optimize_image_ultrafast(image_bytes)
+        models = get_active_models(api_key)
 
         prompt = """당신은 실험일지 OCR 판독기입니다.
 이미지의 실험 파라미터 숫자를 읽어 JSON으로만 반환하세요.
@@ -224,13 +235,13 @@ def parse_tab1_experiment_image(image_bytes):
 
         raw_text = None
         last_err = None
-        for m_name in FAST_MODELS:
+        for m_name in models:
             try:
                 model = genai.GenerativeModel(m_name)
                 resp = model.generate_content(
                     [img, prompt],
                     generation_config={"response_mime_type": "application/json", "temperature": 0.0, "max_output_tokens": 350},
-                    request_options={"timeout": 8}
+                    request_options={"timeout": 12}
                 )
                 if resp and resp.text:
                     raw_text = resp.text
@@ -293,7 +304,7 @@ def parse_tab1_experiment_image(image_bytes):
         return None, f"1번 탭 분석 오류: {str(e)}"
 
 # --------------------------------------------------------------------------
-# [4] 2번 탭 전용 Vision OCR 파서 (초고속 전담)
+# [4] 2번 탭 전용 Vision OCR 파서 (ICP 및 고체 성분 전담)
 # --------------------------------------------------------------------------
 def parse_tab2_analysis_image(image_bytes):
     api_key = st.session_state.gemini_api_key.strip()
@@ -301,8 +312,8 @@ def parse_tab2_analysis_image(image_bytes):
         return None, "사이드바에 Google Gemini API Key를 입력해주세요."
 
     try:
-        genai.configure(api_key=api_key)
         img = optimize_image_ultrafast(image_bytes)
+        models = get_active_models(api_key)
 
         prompt = """당신은 화학 성적서 OCR 판독기입니다.
 LiOH 용액/수세액(mg/L) 및 CaCO3 고체(wt%) 수치를 추출하여 JSON으로 반환하세요.
@@ -316,13 +327,13 @@ LiOH 용액/수세액(mg/L) 및 CaCO3 고체(wt%) 수치를 추출하여 JSON으
 
         raw_text = None
         last_err = None
-        for m_name in FAST_MODELS:
+        for m_name in models:
             try:
                 model = genai.GenerativeModel(m_name)
                 resp = model.generate_content(
                     [img, prompt],
                     generation_config={"response_mime_type": "application/json", "temperature": 0.0, "max_output_tokens": 300},
-                    request_options={"timeout": 8}
+                    request_options={"timeout": 12}
                 )
                 if resp and resp.text:
                     raw_text = resp.text
@@ -460,7 +471,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("🔑 Google Gemini AI 설정")
-    st.caption("초고속 Flash 모델로 1~2초 만에 사진을 판독합니다.")
+    st.caption("1,500회/일 대용량 정식 모델로 사진 인식 및 DoE 레시피를 생성합니다.")
     new_key_input = st.text_input(
         "Google Gemini API Key", 
         value=st.session_state.gemini_api_key, 
@@ -472,7 +483,7 @@ with st.sidebar:
         st.rerun()
 
     if st.session_state.gemini_api_key:
-        st.success("✅ Gemini 초고속 모드 준비 완료")
+        st.success("✅ Gemini API 키 등록 완료")
     st.divider()
 
 # --------------------------------------------------------------------------
@@ -524,7 +535,6 @@ with main_tab1:
                                 "test_dry_cake": "소성 투입 CaCO₃(g)", "calcined_cao": "소성 후 CaO(g)", "calc_temp": "소성 온도(℃)", "calc_time": "소성 시간(h)"
                             }
 
-                            # 미인식 항목은 기본값 그대로 유지
                             for k, val in parsed_tab1.items():
                                 if val is not None and k in tab1_label_map:
                                     old_v = st.session_state[k]
@@ -674,7 +684,7 @@ with main_tab2:
             st.write("")
             if uploaded_icp_img is not None:
                 if st.button("🚀 성적서 사진 분석 및 원소 수치 자동 입력", type="primary", use_container_width=True):
-                    with st.spinner("Gemini AI가 초고속으로 성적서를 판독하고 있습니다..."):
+                    with st.spinner("Gemini AI가 성적서 원소 분석표를 초고속 판독하고 있습니다..."):
                         img_bytes = uploaded_icp_img.read()
                         parsed_tab2, err = parse_tab2_analysis_image(img_bytes)
                         if err:
@@ -1139,16 +1149,17 @@ with main_tab4:
   "precautions": "실험 진행 시 핵심 주의사항 (2~3줄)"
 }}
 """
+                    models = get_active_models(api_key)
                     doe_result = None
                     last_doe_err = None
 
-                    for m_name in FAST_MODELS:
+                    for m_name in models:
                         try:
                             model = genai.GenerativeModel(m_name)
                             resp = model.generate_content(
                                 doe_prompt,
                                 generation_config={"response_mime_type": "application/json", "temperature": 0.2, "max_output_tokens": 500},
-                                request_options={"timeout": 12}
+                                request_options={"timeout": 15}
                             )
                             if resp and resp.text:
                                 clean_json_str = resp.text.replace("```json", "").replace("```", "").strip()
@@ -1227,6 +1238,7 @@ with main_tab5:
         api_key = st.session_state.gemini_api_key.strip()
         if api_key:
             try:
+                models = get_active_models(api_key)
                 context_prompt = f"""당신은 LC-LH 전환 가성화 및 Ca-Loop 공정의 최고 권위 수석 엔지니어입니다.
 현재 공정 데이터:
 - 실험 회차: Run {st.session_state.run_no}
@@ -1241,10 +1253,10 @@ with main_tab5:
 질문: {user_prompt}
 배터리 소재 품질 및 양론적 관점에서 친절하고 명확하게 답변해 주세요."""
                 ai_reply = None
-                for m_name in FAST_MODELS:
+                for m_name in models:
                     try:
                         chat_model = genai.GenerativeModel(m_name)
-                        resp = chat_model.generate_content(context_prompt, request_options={"timeout": 12})
+                        resp = chat_model.generate_content(context_prompt, request_options={"timeout": 15})
                         if resp and resp.text:
                             ai_reply = resp.text
                             break
