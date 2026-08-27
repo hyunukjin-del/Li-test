@@ -137,7 +137,7 @@ if "chat_messages" not in st.session_state:
     ]
 
 # --------------------------------------------------------------------------
-# [2] 공통 도우미 및 모델 탐색
+# [2] 공통 도우미 및 모델 탐색 (오류 완벽 해결)
 # --------------------------------------------------------------------------
 def clean_float(val):
     if val is None:
@@ -179,6 +179,13 @@ def get_available_gemini_models(api_key):
         return sorted_m
     except Exception:
         return ["gemini-1.5-flash", "gemini-2.0-flash"]
+
+def get_best_available_model(api_key):
+    """DoE 및 대화창 전용 모델 인스턴스 반환 함수"""
+    models = get_available_gemini_models(api_key)
+    if models:
+        return genai.GenerativeModel(models[0])
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 # --------------------------------------------------------------------------
 # [3] 1번 탭 전용 Vision OCR 파서 (공정 수치 전담)
@@ -237,7 +244,6 @@ def parse_tab1_experiment_image(image_bytes):
         if not raw_text:
             return None, f"AI 모델 호출 오류: {last_err}"
 
-        # 1차 JSON 파싱
         parsed = {}
         try:
             clean_str = raw_text.replace("```json", "").replace("```", "").strip()
@@ -250,7 +256,6 @@ def parse_tab1_experiment_image(image_bytes):
         except Exception:
             pass
 
-        # 2차 정규식 스캔
         tab1_patterns = {
             "run_no": [r"(?:실험회차|회차|Run|run|No\.?)\s*[:=|\s]\s*(\d+)"],
             "li2co3_mass": [r"(?:Li2CO3\s*투입량|Li2CO3\s*투입|탄산리튬\s*투입량|탄산리튬\s*투입|탄산리튬|LC|Li2CO3|원료)\s*(?:투입량|투입|무게|질량)?\s*[:=|\s]\s*([\d\.]+)"],
@@ -517,7 +522,6 @@ with main_tab1:
                                 "test_dry_cake": "소성 투입 CaCO₃(g)", "calcined_cao": "소성 후 CaO(g)", "calc_temp": "소성 온도(℃)", "calc_time": "소성 시간(h)"
                             }
 
-                            # 1번 탭 항목만 안전하게 갱신 (미인식 항목은 기본값 보존)
                             for k, val in parsed_tab1.items():
                                 if val is not None and k in tab1_label_map:
                                     old_v = st.session_state[k]
@@ -683,7 +687,6 @@ with main_tab2:
                                 "solid_si_wt": "Si 함량 (CaCO₃ wt%)", "solid_mg_wt": "Mg 함량 (CaCO₃ wt%)", "solid_k_wt": "K 함량 (CaCO₃ wt%)"
                             }
 
-                            # 2번 탭 분석치만 안전하게 갱신 (미인식 항목은 기본값 보존)
                             for k, val in parsed_tab2.items():
                                 if val is not None and k in tab2_label_map:
                                     old_v = st.session_state[k]
