@@ -37,6 +37,7 @@ st.set_page_config(page_title=AGENT_TITLE, page_icon="🧪", layout="wide")
 DEFAULT_DATA = {
     "run_no": 1,
     "tab2_run_no": 1,
+    # 1번 탭 공정 항목
     "li2co3_mass": 95.34,
     "li2co3_water": 1040.0,
     "fresh_cao_mass": 92.42,
@@ -58,7 +59,7 @@ DEFAULT_DATA = {
     "calcined_cao": 23.9,
     "calc_temp": 1000.0,
     "calc_time": 1.0,
-    # 액체 ICP 분석 (mg/L)
+    # 2번 탭 분석 항목 (액체 mg/L)
     "icp_li_1": 10500.0,
     "icp_ca_1": 120.0,
     "icp_na_1": 45.0,
@@ -71,7 +72,7 @@ DEFAULT_DATA = {
     "icp_si_w": 2.1,
     "icp_mg_w": 0.3,
     "icp_k_w": 2.0,
-    # 고체 CaCO3 분석 (wt%)
+    # 2번 탭 분석 항목 (고체 wt%)
     "solid_li_wt": 0.38,
     "solid_ca_wt": 38.20,
     "solid_na_wt": 0.015,
@@ -132,11 +133,11 @@ if "history" not in st.session_state:
 
 if "chat_messages" not in st.session_state:
     st.session_state.chat_messages = [
-        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 수기 일지 사진 인식, LiOH 용액(mg/L) 및 CaCO₃(wt%) 통합 분석, M/B 연산에 대해 질문해 주세요."}
+        {"role": "assistant", "content": f"안녕하세요! **{AGENT_TITLE}**입니다. 1번 탭(실험 일지)과 2번 탭(원소 성적서)에 각각 사진을 올려 분석할 수 있습니다."}
     ]
 
 # --------------------------------------------------------------------------
-# [2] 동적 모델 자동 탐색 & 하이브리드 Vision OCR 엔진
+# [2] 공통 도우미 및 모델 탐색
 # --------------------------------------------------------------------------
 def clean_float(val):
     if val is None:
@@ -152,156 +153,48 @@ def clean_float(val):
             return None
     return None
 
-def extract_values_from_raw_text(raw_text):
-    extracted = {}
-    patterns = {
-        "run_no": [r"(?:실험회차|회차|Run|run|No\.?)\s*[:=|\s]\s*(\d+)"],
-        "li2co3_mass": [r"(?:Li2CO3\s*투입량|Li2CO3\s*투입|탄산리튬\s*투입량|탄산리튬\s*투입|탄산리튬|LC|Li2CO3|원료)\s*(?:투입량|투입|무게|질량)?\s*[:=|\s]\s*([\d\.]+)"],
-        "li2co3_water": [r"(?:Li2CO3\s*용매수|Li2CO3\s*용매|용매수|LC\s*물|용해수|탄산리튬\s*물)\s*[:=|\s]\s*([\d\.]+)"],
-        "fresh_cao_mass": [r"(?:신품\s*CaO|신품\s*생석회|생석회\(신\)|신품)\s*[:=|\s]\s*([\d\.]+)"],
-        "recycled_cao_mass": [r"(?:재생\s*CaO|재생\s*생석회|생석회\(재\)|재생)\s*[:=|\s]\s*([\d\.]+)"],
-        "slurry_water": [r"(?:슬러리\s*조제수|슬러리\s*조제|슬러리수|소화수|조제수)\s*[:=|\s]\s*([\d\.]+)"],
-        "temp_c": [r"(?:반응\s*온도|온도|Temp)\s*[:=|\s]\s*([\d\.]+)"],
-        "time_h": [r"(?:반응\s*시간|시간|Time)\s*[:=|\s]\s*([\d\.]+)"],
-        "primary_filtrate_mass": [r"(?:LiOH\s*용액무게|LiOH\s*용액\s*무게|1차\s*여액|여액\s*무게|여액|LiOH\s*용액|여과액)\s*(?:무게|질량)?\s*[:=|\s]\s*([\d\.]+)"],
-        "primary_filtrate_sg": [r"(?:LiOH\s*비중|LiOH비중|여액\s*비중|비중|SG|S\.G)\s*[:=|\s]\s*([\d\.]+)"],
-        "primary_filtrate_ph": [r"(?:LiOH\s*pH|LiOH\s*ph|여액\s*pH|pH|ph)\s*[:=|\s]\s*([\d\.]+)"],
-        "wet_cake_mass": [r"(?:CaCO3\s*무게\(습\)|CaCO3\s*무게\s*\(습\)|1차\s*습케이크|습케익|CaCO3\s*무게|습중량|케익\s*무게)\s*[:=|\s]\s*([\d\.]+)"],
-        "sample_wet": [r"(?:함수율\s*측정\s*습중량|함수율\s*습중량|함수율\s*습|습샘플|샘플\s*습중량)\s*[:=|\s]\s*([\d\.]+)"],
-        "sample_dry": [r"(?:함수율\s*측정\s*건중량|함수율\s*건중량|함수율\s*건|건샘플|샘플\s*건중량)\s*[:=|\s]\s*([\d\.]+)"],
-        "wash_water_in": [r"(?:투입된\s*수세수\s*무게|투입\s*수세수|수세수\s*투입량|수세수|세척수)\s*[:=|\s]\s*([\d\.]+)"],
-        "wash_sol_mass": [r"(?:회수된\s*수세액\s*무게|회수\s*수세액|수세액\s*무게|수세액|세척액)\s*(?:무게|질량)?\s*[:=|\s]\s*([\d\.]+)"],
-        "wash_sol_sg": [r"(?:수세액\s*비중)\s*[:=|\s]\s*([\d\.]+)"],
-        "wash_sol_ph": [r"(?:수세액\s*pH)\s*[:=|\s]\s*([\d\.]+)"],
-        "test_dry_cake": [r"(?:소성\s*투입\s*CaCO3\s*샘플|소성\s*투입|건조케익|CaCO3\s*샘플)\s*[:=|\s]\s*([\d\.]+)"],
-        "calcined_cao": [r"(?:소성\s*후\s*회수된\s*CaO|소성\s*후\s*CaO|회수\s*CaO|회수\s*생석회)\s*[:=|\s]\s*([\d\.]+)"],
-        "calc_temp": [r"(?:소성\s*온도|소성온도|하소온도)\s*[:=|\s]\s*([\d\.]+)"],
-        "calc_time": [r"(?:소성\s*시간|소성시간|하소시간)\s*[:=|\s]\s*([\d\.]+)"]
-    }
-    for key, pat_list in patterns.items():
-        for pat in pat_list:
-            m = re.search(pat, raw_text, re.IGNORECASE)
-            if m:
-                v = clean_float(m.group(1))
-                if v is not None:
-                    extracted[key] = v
-                    break
-    return extracted
-
-def normalize_dict_keys(raw_dict):
-    mapping = {
-        "run_no": ["run_no", "실험회차", "회차", "run", "회차번호"],
-        "li2co3_mass": ["li2co3_mass", "li2co3투입량", "li2co3투입", "li2co3", "lc", "탄산리튬", "탄산리튬투입량", "탄산리튬투입", "원료투입량"],
-        "li2co3_water": ["li2co3_water", "li2co3용매수", "li2co3용매", "용매수", "lc물", "용해수", "탄산리튬물", "물"],
-        "fresh_cao_mass": ["fresh_cao_mass", "신품cao", "신품생석회", "fresh_cao", "생석회신품", "신품"],
-        "recycled_cao_mass": ["recycled_cao_mass", "재생cao", "재생생석회", "recycled_cao", "생석회재생", "재생"],
-        "slurry_water": ["slurry_water", "슬러리조제수", "슬러리조제", "슬러리수", "소화수", "조제수"],
-        "temp_c": ["temp_c", "반응온도", "temp", "온도"],
-        "time_h": ["time_h", "반응시간", "time", "시간"],
-        "primary_filtrate_mass": ["primary_filtrate_mass", "lioh용액무게", "lioh용액", "여액무게", "1차여액", "여액질량"],
-        "primary_filtrate_sg": ["primary_filtrate_sg", "lioh비중", "여액비중", "filtrate_sg", "비중1", "비중"],
-        "primary_filtrate_ph": ["primary_filtrate_ph", "liohph", "여액ph", "filtrate_ph", "ph1", "ph"],
-        "wet_cake_mass": ["wet_cake_mass", "caco3무게(습)", "caco3무게습", "1차습케이크", "습케이크", "caco3무게", "습중량", "caco3습중량", "케익무게"],
-        "sample_wet": ["sample_wet", "함수율측정습중량", "함수율습중량", "함수율습", "샘플습중량", "습중량샘플", "습샘플"],
-        "sample_dry": ["sample_dry", "함수율측정건중량", "함수율건중량", "함수율건", "샘플건중량", "건중량샘플", "건샘플"],
-        "wash_water_in": ["wash_water_in", "투입된수세수무게", "투입수세수", "수세수", "세척수", "수세수투입량"],
-        "wash_sol_mass": ["wash_sol_mass", "회수된수세액무게", "회수수세액", "수세액무게", "수세액질량", "수세액"],
-        "wash_sol_sg": ["wash_sol_sg", "수세액비중"],
-        "wash_sol_ph": ["wash_sol_ph", "수세액ph"],
-        "test_dry_cake": ["test_dry_cake", "소성투입caco3샘플", "소성투입", "건조케익", "caco3샘플"],
-        "calcined_cao": ["calcined_cao", "소성후회수된cao", "소성후cao", "회수cao", "cao회수량"],
-        "calc_temp": ["calc_temp", "소성온도", "하소온도"],
-        "calc_time": ["calc_time", "소성시간", "하소시간"],
-        # ICP 원소
-        "icp_li_1": ["icp_li_1", "li_1", "li_여액", "li"], "icp_ca_1": ["icp_ca_1", "ca_1", "ca_여액", "ca"],
-        "icp_na_1": ["icp_na_1", "na_1", "na_여액", "na"], "icp_si_1": ["icp_si_1", "si_1", "si_여액", "si"],
-        "icp_mg_1": ["icp_mg_1", "mg_1", "mg_여액", "mg"], "icp_k_1": ["icp_k_1", "k_1", "k_여액", "k"],
-        "icp_li_w": ["icp_li_w", "li_w", "li_수세"], "icp_ca_w": ["icp_ca_w", "ca_w", "ca_수세"],
-        "icp_na_w": ["icp_na_w", "na_w", "na_수세"], "icp_si_w": ["icp_si_w", "si_w", "si_수세"],
-        "icp_mg_w": ["icp_mg_w", "mg_w", "mg_수세"], "icp_k_w": ["icp_k_w", "k_w", "k_수세"],
-        "solid_li_wt": ["solid_li_wt", "li_wt", "li_고체"], "solid_ca_wt": ["solid_ca_wt", "ca_wt", "ca_고체"],
-        "solid_na_wt": ["solid_na_wt", "na_wt", "na_고체"], "solid_si_wt": ["solid_si_wt", "si_wt", "si_고체"],
-        "solid_mg_wt": ["solid_mg_wt", "mg_wt", "mg_고체"], "solid_k_wt": ["solid_k_wt", "k_wt", "k_고체"]
-    }
-    
-    normalized = {}
-    for target_key, aliases in mapping.items():
-        for raw_k, raw_v in raw_dict.items():
-            raw_k_clean = str(raw_k).lower().replace(" ", "").replace("_", "").replace("-", "").replace("(", "").replace(")", "")
-            for a in aliases:
-                a_clean = a.lower().replace(" ", "").replace("_", "").replace("-", "").replace("(", "").replace(")", "")
-                if raw_k_clean == a_clean or a_clean in raw_k_clean:
-                    val = clean_float(raw_v)
-                    if val is not None:
-                        normalized[target_key] = val
-                        break
-            if target_key in normalized:
-                break
-    return normalized
-
-def optimize_image_for_vision(image_bytes):
+def optimize_image(image_bytes):
     img = Image.open(io.BytesIO(image_bytes))
     img = ImageOps.exif_transpose(img)
     if img.mode != "RGB":
         img = img.convert("RGB")
-    max_dim = 800
+    max_dim = 850
     if max(img.size) > max_dim:
         img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
     return img
 
-def get_best_available_model(api_key):
+def get_available_gemini_models(api_key):
     genai.configure(api_key=api_key)
     try:
         available = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-        preferred = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "flash"]
-        for p in preferred:
+        priority = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "flash"]
+        sorted_m = []
+        for p in priority:
             for m in available:
-                if p in m.lower():
-                    return genai.GenerativeModel(m)
-        if available:
-            return genai.GenerativeModel(available[0])
+                if p in m.lower() and m not in sorted_m:
+                    sorted_m.append(m)
+        for m in available:
+            if m not in sorted_m:
+                sorted_m.append(m)
+        return sorted_m
     except Exception:
-        pass
-    return genai.GenerativeModel("gemini-1.5-flash")
+        return ["gemini-1.5-flash", "gemini-2.0-flash"]
 
-def parse_image_with_vision(image_bytes, doc_type="lab_note"):
+# --------------------------------------------------------------------------
+# [3] 1번 탭 전용 Vision OCR 파서 (공정 수치 전담)
+# --------------------------------------------------------------------------
+def parse_tab1_experiment_image(image_bytes):
     api_key = st.session_state.gemini_api_key.strip()
     if not api_key:
-        return None, "", "사이드바에 Google Gemini API Key를 입력해주세요."
+        return None, "사이드바에 Google Gemini API Key를 입력해주세요."
 
     try:
-        genai.configure(api_key=api_key)
-        img = optimize_image_for_vision(image_bytes)
+        img = optimize_image(image_bytes)
+        models = get_available_gemini_models(api_key)
 
-        available_models = []
-        try:
-            for m in genai.list_models():
-                if "generateContent" in m.supported_generation_methods:
-                    available_models.append(m.name)
-        except Exception as list_err:
-            return None, "", f"Google API Key 인증 오류: {list_err}. 새 프로젝트에서 발급받은 키인지 확인해주세요."
-
-        if not available_models:
-            return None, "", "현재 API Key로 사용 가능한 모델이 없습니다. 새 프로젝트에서 API Key를 재발급받아주세요."
-
-        # Flash 계열 정식 무료 모델 우선 순차 호출
-        priority_kws = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash", "flash", "gemini"]
-        sorted_models = []
-        for kw in priority_kws:
-            for m in available_models:
-                if kw in m.lower() and m not in sorted_models:
-                    sorted_models.append(m)
-        for m in available_models:
-            if m not in sorted_models:
-                sorted_models.append(m)
-
-        if doc_type == "lab_note":
-            prompt = """이 이미지는 탄산리튬(LC) 가성화 및 Ca-Loop 습식 제련 공정의 실험 일지(수기 또는 인쇄물)입니다.
-이미지에 적힌 항목명과 숫자를 정밀하게 읽고, 아래 JSON 포맷으로 키-값을 매핑하여 순수 숫자만 넣어 반환하세요.
-
-[필수 규칙]
-1. 이미지에 적혀있지 않거나 판독할 수 없는 항목은 절대로 0으로 채우지 말고 반드시 null로 표기하세요.
-2. 오직 이미지에 명시적으로 적힌 숫자만 추출하세요.
+        prompt = """이 이미지는 탄산리튬(LC) 가성화 및 Ca-Loop 습식 제련 공정의 실험 일지(수기 또는 인쇄물)입니다.
+이미지에 적힌 실험 파라미터 숫자들을 읽고, 아래 JSON 포맷으로 키-값을 매핑하여 순수 숫자(float/int)만 넣어 반환하세요.
+[규칙] 이미지에 적혀있지 않은 항목은 절대로 0으로 채우지 말고 반드시 null로 표기하세요.
 
 {
   "run_no": number or null,
@@ -327,18 +220,10 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
   "calc_temp": number or null,
   "calc_time": number or null
 }"""
-        else:
-            prompt = """이 이미지는 LiOH 용액, 수세액 및 CaCO3 고체 성적서입니다. 각 원소 수치를 추출하여 JSON으로 반환하세요. 적혀있지 않은 항목은 반드시 null로 하세요.
-{
-  "icp_li_1": number or null, "icp_ca_1": number or null, "icp_na_1": number or null, "icp_si_1": number or null, "icp_mg_1": number or null, "icp_k_1": number or null,
-  "icp_li_w": number or null, "icp_ca_w": number or null, "icp_na_w": number or null, "icp_si_w": number or null, "icp_mg_w": number or null, "icp_k_w": number or null,
-  "solid_li_wt": number or null, "solid_ca_wt": number or null, "solid_na_wt": number or null, "solid_si_wt": number or null, "solid_mg_wt": number or null, "solid_k_wt": number or null
-}"""
 
         raw_text = None
         last_err = None
-
-        for m_name in sorted_models:
+        for m_name in models:
             try:
                 model = genai.GenerativeModel(m_name)
                 resp = model.generate_content([img, prompt], request_options={"timeout": 15})
@@ -350,29 +235,116 @@ def parse_image_with_vision(image_bytes, doc_type="lab_note"):
                 continue
 
         if not raw_text:
-            return None, "", f"AI 모델 호출 오류: {last_err}"
+            return None, f"AI 모델 호출 오류: {last_err}"
 
-        parsed_dict = {}
+        # 1차 JSON 파싱
+        parsed = {}
         try:
-            clean_json_str = raw_text.replace("```json", "").replace("```", "").strip()
-            raw_json = json.loads(clean_json_str)
+            clean_str = raw_text.replace("```json", "").replace("```", "").strip()
+            raw_json = json.loads(clean_str)
             if isinstance(raw_json, dict):
-                parsed_dict = normalize_dict_keys(raw_json)
+                for k, v in raw_json.items():
+                    val = clean_float(v)
+                    if val is not None:
+                        parsed[k] = val
         except Exception:
             pass
 
-        regex_dict = extract_values_from_raw_text(raw_text)
-        for k, v in regex_dict.items():
-            if k not in parsed_dict or parsed_dict[k] is None:
-                parsed_dict[k] = v
+        # 2차 정규식 스캔
+        tab1_patterns = {
+            "run_no": [r"(?:실험회차|회차|Run|run|No\.?)\s*[:=|\s]\s*(\d+)"],
+            "li2co3_mass": [r"(?:Li2CO3\s*투입량|Li2CO3\s*투입|탄산리튬\s*투입량|탄산리튬\s*투입|탄산리튬|LC|Li2CO3|원료)\s*(?:투입량|투입|무게|질량)?\s*[:=|\s]\s*([\d\.]+)"],
+            "li2co3_water": [r"(?:Li2CO3\s*용매수|Li2CO3\s*용매|용매수|LC\s*물|용해수|탄산리튬\s*물)\s*[:=|\s]\s*([\d\.]+)"],
+            "fresh_cao_mass": [r"(?:신품\s*CaO|신품\s*생석회|생석회\(신\)|신품)\s*[:=|\s]\s*([\d\.]+)"],
+            "recycled_cao_mass": [r"(?:재생\s*CaO|재생\s*생석회|생석회\(재\)|재생)\s*[:=|\s]\s*([\d\.]+)"],
+            "slurry_water": [r"(?:슬러리\s*조제수|슬러리\s*조제|슬러리수|소화수|조제수)\s*[:=|\s]\s*([\d\.]+)"],
+            "temp_c": [r"(?:반응\s*온도|온도|Temp)\s*[:=|\s]\s*([\d\.]+)"],
+            "time_h": [r"(?:반응\s*시간|시간|Time)\s*[:=|\s]\s*([\d\.]+)"],
+            "primary_filtrate_mass": [r"(?:LiOH\s*용액무게|LiOH\s*용액\s*무게|1차\s*여액|여액\s*무게|여액|LiOH\s*용액|여과액)\s*(?:무게|질량)?\s*[:=|\s]\s*([\d\.]+)"],
+            "primary_filtrate_sg": [r"(?:LiOH\s*비중|LiOH비중|여액\s*비중|비중|SG|S\.G)\s*[:=|\s]\s*([\d\.]+)"],
+            "primary_filtrate_ph": [r"(?:LiOH\s*pH|LiOH\s*ph|여액\s*pH|pH|ph)\s*[:=|\s]\s*([\d\.]+)"],
+            "wet_cake_mass": [r"(?:CaCO3\s*무게\(습\)|CaCO3\s*무게\s*\(습\)|1차\s*습케이크|습케익|CaCO3\s*무게|습중량|케익\s*무게)\s*[:=|\s]\s*([\d\.]+)"],
+            "sample_wet": [r"(?:함수율\s*측정\s*습중량|함수율\s*습중량|함수율\s*습|습샘플|샘플\s*습중량)\s*[:=|\s]\s*([\d\.]+)"],
+            "sample_dry": [r"(?:함수율\s*측정\s*건중량|함수율\s*건중량|함수율\s*건|건샘플|샘플\s*건중량)\s*[:=|\s]\s*([\d\.]+)"],
+            "wash_water_in": [r"(?:투입된\s*수세수\s*무게|투입\s*수세수|수세수\s*투입량|수세수|세척수)\s*[:=|\s]\s*([\d\.]+)"],
+            "wash_sol_mass": [r"(?:회수된\s*수세액\s*무게|회수\s*수세액|수세액\s*무게|수세액|세척액)\s*(?:무게|질량)?\s*[:=|\s]\s*([\d\.]+)"],
+            "wash_sol_sg": [r"(?:수세액\s*비중)\s*[:=|\s]\s*([\d\.]+)"],
+            "wash_sol_ph": [r"(?:수세액\s*pH)\s*[:=|\s]\s*([\d\.]+)"],
+            "test_dry_cake": [r"(?:소성\s*투입\s*CaCO3\s*샘플|소성\s*투입|건조케익|CaCO3\s*샘플)\s*[:=|\s]\s*([\d\.]+)"],
+            "calcined_cao": [r"(?:소성\s*후\s*회수된\s*CaO|소성\s*후\s*CaO|회수\s*CaO|회수\s*생석회)\s*[:=|\s]\s*([\d\.]+)"],
+            "calc_temp": [r"(?:소성\s*온도|소성온도|하소온도)\s*[:=|\s]\s*([\d\.]+)"],
+            "calc_time": [r"(?:소성\s*시간|소성시간|하소시간)\s*[:=|\s]\s*([\d\.]+)"]
+        }
+        for k, pat_list in tab1_patterns.items():
+            if k not in parsed or parsed[k] is None:
+                for pat in pat_list:
+                    m = re.search(pat, raw_text, re.IGNORECASE)
+                    if m:
+                        v = clean_float(m.group(1))
+                        if v is not None:
+                            parsed[k] = v
+                            break
 
-        return parsed_dict, raw_text, None
-
+        return parsed, None
     except Exception as e:
-        return None, "", f"AI 분석 오류: {str(e)}"
+        return None, f"1번 탭 분석 오류: {str(e)}"
 
 # --------------------------------------------------------------------------
-# [3] 이메일 발송 공통 함수
+# [4] 2번 탭 전용 Vision OCR 파서 (ICP 및 고체 성분 전담)
+# --------------------------------------------------------------------------
+def parse_tab2_analysis_image(image_bytes):
+    api_key = st.session_state.gemini_api_key.strip()
+    if not api_key:
+        return None, "사이드바에 Google Gemini API Key를 입력해주세요."
+
+    try:
+        img = optimize_image(image_bytes)
+        models = get_available_gemini_models(api_key)
+
+        prompt = """이 이미지는 LiOH 용액 및 수세액 분석치(mg/L)와 CaCO3 고체 성분 분석치(wt%) 성적서입니다.
+원소(Li, Ca, Na, Si, Mg, K)별 수치를 추출하여 아래 JSON 포맷으로 반환하세요.
+[규칙] 이미지에 적혀있지 않은 항목은 절대로 0으로 채우지 말고 반드시 null로 표기하세요.
+
+{
+  "icp_li_1": number or null, "icp_ca_1": number or null, "icp_na_1": number or null, "icp_si_1": number or null, "icp_mg_1": number or null, "icp_k_1": number or null,
+  "icp_li_w": number or null, "icp_ca_w": number or null, "icp_na_w": number or null, "icp_si_w": number or null, "icp_mg_w": number or null, "icp_k_w": number or null,
+  "solid_li_wt": number or null, "solid_ca_wt": number or null, "solid_na_wt": number or null, "solid_si_wt": number or null, "solid_mg_wt": number or null, "solid_k_wt": number or null
+}"""
+
+        raw_text = None
+        last_err = None
+        for m_name in models:
+            try:
+                model = genai.GenerativeModel(m_name)
+                resp = model.generate_content([img, prompt], request_options={"timeout": 15})
+                if resp and resp.text:
+                    raw_text = resp.text
+                    break
+            except Exception as ex:
+                last_err = ex
+                continue
+
+        if not raw_text:
+            return None, f"AI 모델 호출 오류: {last_err}"
+
+        parsed = {}
+        try:
+            clean_str = raw_text.replace("```json", "").replace("```", "").strip()
+            raw_json = json.loads(clean_str)
+            if isinstance(raw_json, dict):
+                for k, v in raw_json.items():
+                    val = clean_float(v)
+                    if val is not None:
+                        parsed[k] = val
+        except Exception:
+            pass
+
+        return parsed, None
+    except Exception as e:
+        return None, f"2번 탭 성적서 분석 오류: {str(e)}"
+
+# --------------------------------------------------------------------------
+# [5] 이메일 발송 공통 함수
 # --------------------------------------------------------------------------
 def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w, li_cake_loss,
                       lioh_conc, li_1, ca_1, na_1, si_1, mg_1, k_1, 
@@ -477,7 +449,7 @@ def send_email_report(run_num, mass_cls, loss_m, li_rec_tot, li_rec_1, li_rec_w,
         return False, f"메일 발송 실패: {err_msg}"
 
 # --------------------------------------------------------------------------
-# [4] 사이드바: Google Gemini API Key 설정
+# [6] 사이드바: Google Gemini API Key 설정
 # --------------------------------------------------------------------------
 with st.sidebar:
     st.header("🔑 Google Gemini AI 설정")
@@ -497,7 +469,7 @@ with st.sidebar:
     st.divider()
 
 # --------------------------------------------------------------------------
-# [5] 메인 화면 및 6개 탭 구성
+# [7] 메인 화면 및 6개 탭 구성
 # --------------------------------------------------------------------------
 st.title(f"🧪 {AGENT_TITLE}")
 st.caption("LiOH 용액(mg/L) & CaCO₃(wt%) 통합 분석 M/B | AI DoE 자율 실험계획 | Gemini 사진 인식 | 리포트 자동 발송")
@@ -512,10 +484,10 @@ main_tab1, main_tab2, main_tab3, main_tab4, main_tab5, main_tab6 = st.tabs([
 ])
 
 # --------------------------------------------------------------------------
-# TAB 1: 실험 데이터 입력 및 기초 M/B 연산
+# TAB 1: 실험 데이터 입력 및 기초 M/B 연산 (1번 탭 데이터 전용 독립 인식)
 # --------------------------------------------------------------------------
 with main_tab1:
-    with st.expander("📷 [AI Vision] 수기/인쇄 실험 일지 사진으로 자동 입력", expanded=True):
+    with st.expander("📷 [AI Vision] 수기/인쇄 실험 일지 사진으로 자동 입력 (1번 탭 전용)", expanded=True):
         col_img1, col_img2 = st.columns([2, 1])
         with col_img1:
             uploaded_note_img = st.file_uploader(
@@ -527,15 +499,15 @@ with main_tab1:
             st.write("")
             st.write("")
             if uploaded_note_img is not None:
-                if st.button("🚀 사진 분석 및 수치 자동 입력", type="primary", use_container_width=True):
-                    with st.spinner("Gemini AI가 일지 내용을 2초 만에 판독하고 있습니다..."):
+                if st.button("🚀 실험 일지 사진 분석 및 수치 자동 입력", type="primary", use_container_width=True):
+                    with st.spinner("Gemini AI가 실험 일지 내용을 분석하고 있습니다..."):
                         img_bytes = uploaded_note_img.read()
-                        parsed_data, raw_ai_text, err = parse_image_with_vision(img_bytes, doc_type="lab_note")
+                        parsed_tab1, err = parse_tab1_experiment_image(img_bytes)
                         if err:
                             st.error(f"❌ {err}")
-                        elif parsed_data:
+                        elif parsed_tab1:
                             applied_list = []
-                            label_map = {
+                            tab1_label_map = {
                                 "run_no": "실험 회차", "li2co3_mass": "Li₂CO₃ 투입량(g)", "li2co3_water": "Li₂CO₃ 용매수(g)",
                                 "fresh_cao_mass": "신품 CaO 투입량(g)", "recycled_cao_mass": "재생 CaO 투입량(g)", "slurry_water": "슬러리 조제수(g)",
                                 "temp_c": "반응 온도(℃)", "time_h": "반응 시간(h)", "primary_filtrate_mass": "LiOH 용액 무게(g)",
@@ -545,32 +517,32 @@ with main_tab1:
                                 "test_dry_cake": "소성 투입 CaCO₃(g)", "calcined_cao": "소성 후 CaO(g)", "calc_temp": "소성 온도(℃)", "calc_time": "소성 시간(h)"
                             }
 
-                            # 미인식 항목은 0으로 바꾸지 않고 기존 기본값 그대로 보존
-                            for k, val in parsed_data.items():
-                                if val is not None and k in DEFAULT_DATA:
+                            # 1번 탭 항목만 안전하게 갱신 (미인식 항목은 기본값 보존)
+                            for k, val in parsed_tab1.items():
+                                if val is not None and k in tab1_label_map:
                                     old_v = st.session_state[k]
                                     new_v = int(val) if k == "run_no" else float(val)
                                     st.session_state[k] = new_v
                                     applied_list.append({
-                                        "항목명": label_map.get(k, k),
+                                        "항목명": tab1_label_map[k],
                                         "기존값": old_v,
                                         "사진에서 읽은 새 값": new_v
                                     })
 
-                            if "run_no" in parsed_data and parsed_data["run_no"] is not None:
-                                st.session_state.tab2_run_no = int(parsed_data["run_no"])
+                            if "run_no" in parsed_tab1 and parsed_tab1["run_no"] is not None:
+                                st.session_state.tab2_run_no = int(parsed_tab1["run_no"])
 
                             if applied_list:
-                                st.session_state.last_applied_report = applied_list
+                                st.session_state.tab1_applied_report = applied_list
                                 st.rerun()
                             else:
-                                st.warning("⚠️ 사진에서 인식 가능한 수치를 추출하지 못했습니다.")
+                                st.warning("⚠️ 사진에서 인식 가능한 실험 일지 수치를 찾지 못했습니다.")
 
-    # 판독 결과 검증창 (성공 시 즉시 출력)
-    if "last_applied_report" in st.session_state and st.session_state.last_applied_report:
-        st.success(f"🎉 판독 완료! 총 **{len(st.session_state.last_applied_report)}개** 수치가 아래 입력창에 즉시 반영되었습니다. (사진에 없는 항목은 기본값 유지)")
-        with st.expander("📋 [검증] 변경된 수치 비교표", expanded=False):
-            st.dataframe(pd.DataFrame(st.session_state.last_applied_report), use_container_width=True)
+    # 1번 탭 판독 결과 검증창
+    if "tab1_applied_report" in st.session_state and st.session_state.tab1_applied_report:
+        st.success(f"🎉 판독 완료! 총 **{len(st.session_state.tab1_applied_report)}개** 공정 수치가 1번 탭에 즉시 반영되었습니다. (사진에 없는 항목은 기본값 유지)")
+        with st.expander("📋 [검증] 변경된 실험 일지 수치 비교표", expanded=False):
+            st.dataframe(pd.DataFrame(st.session_state.tab1_applied_report), use_container_width=True)
 
     with st.expander("📝 이번 회차 실험 수치 입력 폼", expanded=True):
         col_in1, col_in2 = st.columns(2)
@@ -672,7 +644,7 @@ with main_tab1:
     k4.metric("Ca-Loop 원소 회수율", f"{ca_loop_recovery:.2f} %", f"재생잠재 {pot_total_cao:.1f}g")
 
 # --------------------------------------------------------------------------
-# TAB 2: 🧪 LiOH 용액 & CaCO₃ 통합 분석
+# TAB 2: 🧪 LiOH 용액 & CaCO₃ 통합 분석 (2번 탭 데이터 전용 독립 인식)
 # --------------------------------------------------------------------------
 with main_tab2:
     col_hdr1, col_hdr2 = st.columns([3, 1])
@@ -682,7 +654,7 @@ with main_tab2:
     with col_hdr2:
         st.number_input("📌 분석 대상 회차 (Run No.)", min_value=1, step=1, key="tab2_run_no", on_change=sync_tab2_to_tab1)
 
-    with st.expander("📷 [AI Vision] LiOH용액 & CaCO₃ 성적서 사진으로 자동 입력 (클릭하여 열기)", expanded=False):
+    with st.expander("📷 [AI Vision] LiOH용액 & CaCO₃ 성적서 사진으로 자동 입력 (2번 탭 전용)", expanded=False):
         col_icp_img1, col_icp_img2 = st.columns([2, 1])
         with col_icp_img1:
             uploaded_icp_img = st.file_uploader(
@@ -694,18 +666,46 @@ with main_tab2:
             st.write("")
             st.write("")
             if uploaded_icp_img is not None:
-                if st.button("🚀 성적서 사진 판독 및 자동 입력", type="primary", use_container_width=True):
-                    with st.spinner("Gemini AI가 LiOH 용액 및 CaCO₃ 분석표를 판독하고 있습니다..."):
+                if st.button("🚀 성적서 사진 분석 및 원소 수치 자동 입력", type="primary", use_container_width=True):
+                    with st.spinner("Gemini AI가 성적서 원소 분석표를 판독하고 있습니다..."):
                         img_bytes = uploaded_icp_img.read()
-                        parsed_icp, raw_icp_text, err = parse_image_with_vision(img_bytes, doc_type="icp_report")
+                        parsed_tab2, err = parse_tab2_analysis_image(img_bytes)
                         if err:
                             st.error(f"❌ {err}")
-                        elif parsed_icp:
-                            for k, val in parsed_icp.items():
-                                if val is not None and k in DEFAULT_DATA:
-                                    st.session_state[k] = float(val)
-                            st.success("🎉 LiOH 용액(mg/L) 및 CaCO₃(wt%) 성분값 판독 및 자동 반영 완료! (미인식 항목 기본값 유지)")
-                            st.rerun()
+                        elif parsed_tab2:
+                            applied_list_tab2 = []
+                            tab2_label_map = {
+                                "icp_li_1": "Li 농도 (LiOH용액 mg/L)", "icp_ca_1": "Ca 농도 (LiOH용액 mg/L)", "icp_na_1": "Na 농도 (LiOH용액 mg/L)",
+                                "icp_si_1": "Si 농도 (LiOH용액 mg/L)", "icp_mg_1": "Mg 농도 (LiOH용액 mg/L)", "icp_k_1": "K 농도 (LiOH용액 mg/L)",
+                                "icp_li_w": "Li 농도 (수세액 mg/L)", "icp_ca_w": "Ca 농도 (수세액 mg/L)", "icp_na_w": "Na 농도 (수세액 mg/L)",
+                                "icp_si_w": "Si 농도 (수세액 mg/L)", "icp_mg_w": "Mg 농도 (수세액 mg/L)", "icp_k_w": "K 농도 (수세액 mg/L)",
+                                "solid_li_wt": "Li 함량 (CaCO₃ wt%)", "solid_ca_wt": "Ca 함량 (CaCO₃ wt%)", "solid_na_wt": "Na 함량 (CaCO₃ wt%)",
+                                "solid_si_wt": "Si 함량 (CaCO₃ wt%)", "solid_mg_wt": "Mg 함량 (CaCO₃ wt%)", "solid_k_wt": "K 함량 (CaCO₃ wt%)"
+                            }
+
+                            # 2번 탭 분석치만 안전하게 갱신 (미인식 항목은 기본값 보존)
+                            for k, val in parsed_tab2.items():
+                                if val is not None and k in tab2_label_map:
+                                    old_v = st.session_state[k]
+                                    new_v = float(val)
+                                    st.session_state[k] = new_v
+                                    applied_list_tab2.append({
+                                        "원소 분석 항목": tab2_label_map[k],
+                                        "기존값": old_v,
+                                        "성적서에서 읽은 새 값": new_v
+                                    })
+
+                            if applied_list_tab2:
+                                st.session_state.tab2_applied_report = applied_list_tab2
+                                st.rerun()
+                            else:
+                                st.warning("⚠️ 성적서 사진에서 인식 가능한 원소 분석치를 찾지 못했습니다.")
+
+    # 2번 탭 판독 결과 검증창
+    if "tab2_applied_report" in st.session_state and st.session_state.tab2_applied_report:
+        st.success(f"🎉 판독 완료! 총 **{len(st.session_state.tab2_applied_report)}개** 원소 분석 수치가 2번 탭에 즉시 반영되었습니다. (성적서에 없는 항목은 기본값 유지)")
+        with st.expander("📋 [검증] 변경된 성적서 원소 수치 비교표", expanded=False):
+            st.dataframe(pd.DataFrame(st.session_state.tab2_applied_report), use_container_width=True)
 
     with st.container():
         col_up1, col_up2 = st.columns([3, 1])
@@ -792,7 +792,7 @@ with main_tab2:
                             break
 
                 matched_elems = list(set(matched_elems))
-                st.success(f"🎉 엑셀 분석 완료! 매칭된 원소: **{', '.join(matched_elems)}** (LiOH용액 & CaCO₃ 자동 반영)")
+                st.success(f"🎉 엑셀 분석 완료! 매칭된 원소: **{', '.join(matched_elems)}** (2번 탭 데이터 자동 반영)")
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ 엑셀 파싱 오류: {e}")
@@ -973,7 +973,7 @@ with main_tab2:
                 loi=loi_pct, purity=purity_caco3, makeup=fresh_makeup, cao_rec=calcined_cao,
                 cake_moisture=cake_moisture, dry_caco3_mass=est_total_dry_solids,
                 wash_water_in=wash_water_in, wash_sol_mass=wash_sol_mass,
-                df_icp_tbl=df_integrated_summary, df_sim_tbl=df_simulation, is_auto=False
+                df_icp_tbl=df_integrated_summary, df_sim_tbl=None, is_auto=True
             )
             if ok:
                 st.toast(f"📧 통합 리포트 메일 자동 발송 완료!", icon="🎉")
